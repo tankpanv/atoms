@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import jobs
 import test_billing as fixtures
 from coding_runtime import ModelTemporaryError
+from planning_recovery import PlanningCheckpointReached
 
 
 class JobRecoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -57,3 +58,37 @@ class JobRecoveryTests(unittest.IsolatedAsyncioTestCase):
             with jobs.connection() as conn:
                 row=conn.execute('SELECT status,recovery_attempts FROM agent_jobs WHERE id=%s',(self.job,)).fetchone()
                 self.assertEqual(row['status'],'error');self.assertEqual(row['recovery_attempts'],attempts)
+
+    async def test_planning_checkpoint_preserves_available_version_without_task_failure(self):
+        with jobs.connection() as conn:
+            conn.execute("UPDATE agent_jobs SET status='queued' WHERE id=%s", (self.job,))
+            conn.execute("UPDATE projects SET preview_html='<p>available</p>' WHERE id=%s", (self.project,))
+        with tempfile.TemporaryDirectory() as directory, patch('jobs.ensure_workspace', return_value=Path(directory)), \
+                patch('jobs.make_plan', AsyncMock(side_effect=PlanningCheckpointReached('Draft and source observations saved'))), \
+                patch('jobs.run_agent', AsyncMock()) as executor:
+            await jobs.process_project_queue(self.project)
+            executor.assert_not_called()
+        with jobs.connection() as conn:
+            job = conn.execute('SELECT status,recovery_attempts FROM agent_jobs WHERE id=%s', (self.job,)).fetchone()
+            project = conn.execute('SELECT status,preview_html FROM projects WHERE id=%s', (self.project,)).fetchone()
+            self.assertEqual(job['status'], 'stopped'); self.assertEqual(job['recovery_attempts'], 0)
+            self.assertEqual(project['status'], 'ready'); self.assertEqual(project['preview_html'], '<p>available</p>')
+            self.assertEqual(conn.execute("SELECT count(*) AS n FROM agent_steps WHERE job_id=%s AND kind='error'", (self.job,)).fetchone()['n'], 0)
+            self.assertEqual(conn.execute("SELECT label FROM agent_steps WHERE job_id=%s AND kind='stop'", (self.job,)).fetchone()['label'], '规划尚待解决，进度已保存')
+
+    async def test_continue_prefers_pending_planning_goal_over_old_execution_checkpoint(self):
+        import json
+        from agent_session import AgentSession
+        from test_agent_execution import cli_plan
+        with jobs.connection() as conn:
+            conn.execute("UPDATE agent_jobs SET status='queued',prompt='继续' WHERE id=%s", (self.job,))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = AgentSession(root)
+            session.save_phase('planning', {'request': 'Add persistence', 'completed': False})
+            root.joinpath('.atoms/task-state.json').write_text(json.dumps({'request': 'Old CLI goal', 'plan': cli_plan(), 'completed': False}))
+            with patch('jobs.ensure_workspace', return_value=root), \
+                    patch('jobs.make_plan', AsyncMock(side_effect=PlanningCheckpointReached('Saved'))) as planner:
+                await jobs.process_project_queue(self.project)
+            self.assertEqual(planner.await_args.args[1], 'Add persistence')
+            self.assertTrue(planner.await_args.kwargs['resume_planning'])

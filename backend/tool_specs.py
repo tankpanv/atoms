@@ -1,5 +1,5 @@
 """Complete public tool contracts. Applied to the same schemas used for validation."""
-from tool_limits import READ_LIMIT_MAX, READ_BATCH_MAX, READ_BATCH_CHARS_MAX, SHELL_TIMEOUT_DEFAULT
+from tool_limits import READ_LIMIT_MAX, READ_BATCH_MAX, READ_BATCH_CHARS_MAX, SHELL_COMMAND_MAX, SHELL_TIMEOUT_DEFAULT
 
 
 def complete_specs(tools):
@@ -32,7 +32,7 @@ def complete_specs(tools):
         'old':'Nonempty exact text occurring exactly once in the current file; no regex/fuzzy matching. Read current source first.',
         'new':'Exact replacement text; empty string deletes the matching old block.',
         'patch':'Nonempty unified diff or unique exact-context @@ hunks. Prefix each hunk line with space, + or -. No fuzzy matching, no multi-file patch; path identifies one existing file.',
-        'command':'Noninteractive Bash command, 1–2000 characters, not whitespace-only, no NUL. Runs in project root with errexit and pipefail: failed assertions stop the command. Use if/|| explicitly for expected failures. Long-lived services use workspace dev/services and runtime_check. Nonzero exit is real failure evidence.',
+        'command':f'Noninteractive Bash command, 1–{SHELL_COMMAND_MAX} characters, not whitespace-only, no NUL. Runs in project root with errexit and pipefail: failed assertions stop the command. Use if/|| explicitly for expected failures. Long-lived services use workspace dev/services and runtime_check. Nonzero exit is real failure evidence.',
         'requirement_ids':'Optional unique requirement IDs copied from get_tasks/current plan; only actual checked requirements. Unknown IDs are rejected; omit or [] for observations not proving acceptance.',
         'evidence_ids':'Unique real successful verification IDs from execution tools/get_tasks. status=done requires at least one fresh relevant ID; never invent IDs.',
         'note':'Optional factual progress text, at most 8000 characters; a note is not proof of completion.',
@@ -64,15 +64,15 @@ def complete_specs(tools):
                 walk(node.get('items',{}),'id' if field in ('requirement_ids','evidence_ids') else field)
             if kind=='string':
                 node.setdefault('maxLength',8000)
-                if field not in ('content','new','value','include','note','service'):
+                if field not in ('content','new','value','include','note','service','expect_body'):
                     node.setdefault('minLength',1)
                 if field in ('path','directory','pattern','include','selector','source_selector'):
                     node['maxLength']=2048
                 if field in ('content','old','new','patch'):
                     node.pop('maxLength', None)
                 if field in ('id','output_id'):node['maxLength']=128
-                if field=='command':node['maxLength']=2000
-                if field not in ('content','new','value','include','note','service'):
+                if field=='command':node['maxLength']=SHELL_COMMAND_MAX
+                if field not in ('content','new','value','include','note','service','expect_body'):
                     node['x-nonblank']=True
                 node['x-noNul']=True
             if kind=='integer' and field=='offset':node['minimum']=0
@@ -80,6 +80,8 @@ def complete_specs(tools):
                 node['description']=explanations[field] + (' '+node['description'] if node.get('description') else '')
             for branch in node.get('oneOf',[]):walk(branch,field)
         walk(schema)
+        if name == 'http_request':
+            function['description'] += ' For login/register use save_as with a separate name per account, then auth_from={response: name}; never manually copy opaque JWTs. JSON Pointer references {{http:name:/field}} in path/body/assertions copy exact saved values; several dependent tool calls can run sequentially in one model response. expect_json empty arrays require actual emptiness; use expect_body="" for 204. Keep fixture creation, update, readback and cleanup in order; never assert a deleted record still exists.'
         if name == 'browser_check':
             function['description'] += ' Browser cookies and application session storage persist between calls for this project; logout clears the session. Use actual returned controls/selectors and current DOM, not guessed HTML attributes. API tool login does not authenticate the browser. For login/setup-only calls omit requirement_ids. Incomplete model-issued verification flows execute as setup with coverage removed and reported; only full actual business assertions can verify requirements.'
             actions=schema['properties']['actions']; actions['minItems']=1

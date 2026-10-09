@@ -6,6 +6,12 @@ Atoms 风格的 AI 项目构建平台，包含项目管理、对话式编码、�
 
 Agent 构建的详细流程、架构、工具、循环退出条件及上下文缓存复用见 [Agent 构建全过程](docs/AGENT_BUILD_PIPELINE.md)。
 
+构建缓慢、循环和验收缺陷的根因及执行器修复见 [Agent 可靠性修复复盘](docs/AGENT_RELIABILITY_FIXES.md)。
+
+Agent 全局决策、任务动态调整、工具响应复用与收敛优化见 [Agent 自适应执行优化](docs/AGENT_ADAPTIVE_EXECUTION.md)。
+
+规划校验中断、模板事实误导及可恢复规划机制见 [Agent 规划恢复修复](docs/AGENT_PLANNING_RECOVERY.md)。
+
 ## 部署
 
 需要 Linux、Docker Engine 和 Docker Compose v2；Ubuntu/Debian 缺少 Python、curl 或 Docker 时，部署脚本会安装依赖。

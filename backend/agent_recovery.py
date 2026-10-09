@@ -80,3 +80,58 @@ def recovery_facts(root, ledger, journal, source, runtime, failures):
     facts['relevant_source'] = {name: files[name][:3000] for name in paths
                                 if name in files and isinstance(files[name], str)}
     return facts
+
+
+def adaptive_recovery_context(facts, incident):
+    """Give the acting model an evidence update, not another model's verdict."""
+    from execution_guard import failure_facts
+    compact = {
+        'goal': facts['goal'],
+        'requirements': [{'id': r['id'], 'description': r['description'], 'verification': r['verification']}
+                         for r in facts['requirements']],
+        'tasks': [{k: task.get(k) for k in ('id', 'status', 'depends_on', 'requirement_ids')}
+                  for task in facts['tasks']],
+        'acceptance_gaps': facts['acceptance_gaps'],
+        'failed_operations': [{'tool': e['name'], 'error': failure_facts(e['name'], e.get('output', ''))}
+                              for e in facts['actual_failed_operations']],
+        'recent_receipts': [{k: e.get(k) for k in ('id', 'kind', 'exit_code', 'requirement_ids', 'current_source')}
+                            for e in facts['recent_receipts']],
+        'previous_experiments': [{'status': e.get('status'), 'observations': e.get('actual_observations', [])[-3:]}
+                                 for e in incident.get('previous_attempts', [])[-2:]],
+    }
+    return ('当前路径没有收敛。你拥有原始上下文及实际工具，直接根据以下事实统筹并执行，不等待另一模型诊断。'
+            '先区分实现缺陷、实验输入/断言错误、阶段依赖与证据缺口；比较已有假设与实际结果，'
+            '选一个尚未证伪的解释，执行能区分原因的最小实验，再依据结果修改或完成验收。'
+            '可用 revise_tasks 合并纵向链路、调整依赖或切换可推进的工作；不放宽原始验收。'
+            '避免同一失败仅换账号、随机 ID 或措辞重试。需要复用动态响应时使用 save_as/auth_from，'
+            '不要手抄 token；测试数据严格按创建、读取、更新、删除、再读取顺序管理。'
+            '代码已满足需求时关联现有成功证据并完成任务；真正存在外部阻塞则保存具体证据和剩余项。\n'
+            + json.dumps(compact, ensure_ascii=False))
+
+
+def final_readback_requests(entries, source, mutation_sequence=0):
+    """Select latest reads of final state, never historical fixture states."""
+    import re
+    mutation_sequence = max([mutation_sequence] + [entry.get('sequence', index + 1)
+        for index, entry in enumerate(entries) if entry.get('name') == 'http_request'
+        and (entry.get('args') or {}).get('method', 'GET').upper() not in ('GET', 'HEAD')])
+    selected = {}
+    for index, entry in sorted(enumerate(entries), key=lambda pair: pair[1].get('sequence', pair[0])):
+        args = dict(entry.get('args') or {})
+        method = args.get('method', 'GET').upper()
+        if entry.get('name') != 'http_request' or entry.get('source') != source or method not in ('GET', 'HEAD'):
+            continue
+        if entry.get('sequence', index + 1) <= mutation_sequence:
+            continue
+        path = re.sub(r'^/api/runtime/[^/]+(?=/|$)', '', args.get('path', '/')) or '/'
+        args['path'] = path
+        identity = json.dumps({'service': args.get('service', ''), 'method': method, 'path': path,
+                               'auth_from': args.get('auth_from'), 'headers': args.get('headers', {})}, sort_keys=True)
+        # A later failed read invalidates older expectations for the same identity.
+        selected.pop(identity, None)
+        if (entry.get('code') == 0 and 200 <= args.get('expect_status', 200) < 300
+                and ('expect_json' in args or 'expect_schema' in args or 'expect_body' in args)
+                and args.get('requirement_ids') and path.split('?')[0].rstrip('/') not in
+                ('', '/health', '/api/health', '/healthz', '/api/ready', '/ready', '/readyz')):
+            selected[identity] = args
+    return list(selected.values())[-8:]

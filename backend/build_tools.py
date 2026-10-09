@@ -23,12 +23,20 @@ def stamp_tools(plan, tools):
     return plan if tools is None else {**plan, 'enabled_tools': normalize_tools(tools)}
 
 
+def api_acceptance_required(plan):
+    """Explicit API requirements keep their acceptance contract in every tier."""
+    return any(item.get('verification') == 'api' and item.get('origin', 'explicit') == 'explicit'
+               for item in plan.get('requirements', []))
+
+
 def tool_instructions(tools, build_tier=None):
     if 'browser_check' in normalize_tools(tools):
         return '\n用户已启用 browser_check，可用真实浏览器验证核心交互。'
     normal_demo = build_tier == 'normal'
     return ('\n用户未勾选浏览器验收：browser_check 禁用。不得调用或要求浏览器验收，'
             '不得通过 run_shell 自行启动 Playwright/Chromium 绕过用户选择。'
+            '按 requirements.verification 和实际开放工具取得验收证据；可选浏览器工具未开启本身不是功能延期原因。'
+            '已经通过当前验收合同的任务正常完成，交付说明另行列出未做完整浏览器交互检查，不能冒充 DOM 操作已验证。'
             + ('普通档优先真实构建、服务启动和页面 JavaScript 首屏；除非用户明确要求 API，不逐接口探测，未配置依赖记 TODO。'
                if normal_demo else
                '仍须完整实现需求、执行适用构建/业务测试、检查真实服务启动与 HTTP/API 可用性。'

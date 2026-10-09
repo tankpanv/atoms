@@ -31,7 +31,7 @@ from coding_runtime import ModelContextOverflow, ModelTemporaryError
 from dependency_policy import INSTRUCTIONS as DEPENDENCY_POLICY, repair_guidance
 from billing_context import active_job
 from tool_contract import ToolArgumentError, parse_tool_arguments
-from tool_limits import (SHELL_TIMEOUT_DEFAULT, SHELL_TIMEOUT_MAX, READ_LIMIT_MAX,
+from tool_limits import (SHELL_COMMAND_MAX, SHELL_TIMEOUT_DEFAULT, SHELL_TIMEOUT_MAX, READ_LIMIT_MAX,
                          READ_BATCH_MAX, READ_BATCH_CHARS_MAX, WRITE_BATCH_MAX, BROWSER_ACTIONS_MAX)
 from coding_runtime import (AgentState, ModelGateway, apply_unified_patch, changed_diff, configured_tests,
                              has_build_command, retrieve_context, symbol_search, model_output_limit)
@@ -395,8 +395,8 @@ async def run_command(project_id: uuid.UUID, args: list[str], timeout: int = 120
 
 
 async def run_shell(project_id: uuid.UUID, command: str, timeout: int = SHELL_TIMEOUT_DEFAULT):
-    if not command.strip() or len(command) > 2000 or "\x00" in command:
-        raise ValueError("命令长度需为 1–2000 个字符")
+    if not command.strip() or len(command) > SHELL_COMMAND_MAX or "\x00" in command:
+        raise ValueError(f"命令长度需为 1–{SHELL_COMMAND_MAX} 个字符，不能仅含空白或包含 NUL 字符")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1:
         raise ValueError("timeout 必须是正整数秒")
     timeout = min(timeout, SHELL_TIMEOUT_MAX)
@@ -595,7 +595,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "show_diff", "description": "Show the source changes made during this task, compared with its starting state.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "list_documents", "description": "List all uploaded project documents with stable IDs and extracted text lengths.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "read_document", "description": "Read an extracted uploaded document by ID, in bounded character ranges. Use offsets to inspect large documents.", "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, "required": ["id"]}}},
-    {"type": "function", "function": {"name": "run_shell", "description": "Run noninteractive initialization, dependency installation, inspections or tests. Pass requirement_ids when verifying acceptance. Returns a verification ID for the actual command result.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "timeout": {"type": "integer", "minimum": 1, "maximum": 180}, "requirement_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["command"]}}},
+    {"type": "function", "function": {"name": "run_shell", "description": "Run noninteractive initialization, dependency installation, inspections or tests. Pass requirement_ids when verifying acceptance. Returns a verification ID for the actual command result.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}, "timeout": {"type": "integer", "minimum": 1, "maximum": SHELL_TIMEOUT_MAX}, "requirement_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["command"]}}},
     {"type": "function", "function": {"name": "run_build", "description": "Execute the project's actual configured build; returns terminal output and verification ID.", "parameters": {"type": "object", "properties": {"requirement_ids": {"type": "array", "items": {"type": "string"}}}}}},
     {"type": "function", "function": {"name": "scaffold_project", "description": "Initialize a new complete frontend using the real official Vite CLI; refuses to overwrite existing source. Creates root workspace commands and preview config, not product functionality.", "parameters": {"type": "object", "properties": {"directory": {"type": "string"}, "template": {"type": "string", "enum": ["react-ts", "vue-ts", "svelte-ts", "vanilla-ts", "solid-ts", "preact-ts"]}}}}},
     {"type": "function", "function": {"name": "get_tasks", "description": "Read compact task progress and verification IDs. Original requirements and plan remain in the initial prompt and .atoms/PLAN.md.", "parameters": {"type": "object", "properties": {}}}},
@@ -605,9 +605,25 @@ TOOLS = [
     {"type": "function", "function": {"name": "http_request", "description": "Test a live project endpoint with a real HTTP request and status/JSON assertions. service selects a configured backend, or omit to verify the frontend proxy. Returns evidence ID.", "parameters": {"type": "object", "properties": {"service": {"type": "string"}, "path": {"type": "string"}, "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]}, "body": {}, "headers": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Project API headers, including its own Authorization Bearer token when required"}, "expect_status": {"type": "integer"}, "expect_json": {}, "requirement_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["path", "expect_status"]}}},
     {"type": "function", "function": {"name": "browser_check", "description": "Use real Chromium to exercise application user flows and assertions. Runs through the actual preview gateway. Reports console/network failures, DOM text and screenshot path. assert_response uses selector as a project-relative API path and optional method/status/expect_json to verify real results, including expected 401/422 failures. Pass requirement_ids for tested acceptance requirements.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "actions": {"type": "array", "items": {"type": "object", "properties": {"action": {"type": "string", "enum": ["click", "fill", "fill_from_text", "press", "check", "uncheck", "select", "reload", "assert_visible", "assert_text", "assert_value", "assert_count", "assert_response"]}, "method": {"type":"string","enum":["GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"]}, "status": {"type":"integer","minimum":100,"maximum":599}, "expect_json": {}, "selector": {"type": "string"}, "source_selector": {"type":"string", "description":"For fill_from_text: copy this visible element text into the target input, allowing random answers without altering production code."}, "value": {}}, "required": ["action"]}}, "requirement_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["actions"]}}},
 ]
+TOOLS.append({'type': 'function', 'function': {
+    'name': 'revise_tasks',
+    'description': 'Adapt execution when observations show task decomposition, order or focus is ineffective. Merge a vertical slice, split a blocker or reorder independent work. Preserve original requirements and final acceptance. Changed tasks lose completion; real evidence remains. Do not revise to reset counters.',
+    'parameters': {'type': 'object', 'properties': {
+        'reason': {'type': 'string', 'description': 'Actual observations, why the previous approach failed, and why this new sequence addresses the blocker.'},
+        'tasks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {'type': 'object', 'properties': {
+            'id': {'type': 'string'}, 'title': {'type': 'string'},
+            'requirement_ids': {'type': 'array', 'items': {'type': 'string'}},
+            'depends_on': {'type': 'array', 'items': {'type': 'string'}},
+            'files': {'type': 'array', 'items': {'type': 'string'}},
+            'verification': {'type': 'string'}},
+            'required': ['id', 'title', 'requirement_ids', 'depends_on', 'files', 'verification']}}
+    }, 'required': ['reason', 'tasks']}}})
 for _tool in TOOLS:
     if _tool['function']['name'] == 'http_request':
         _tool['function']['parameters']['properties'].update({
+            'save_as': {'type': 'string', 'pattern': '^[A-Za-z][A-Za-z0-9_-]{0,63}$', 'description': 'Save a successfully asserted JSON response under a project-private name, e.g. alice_login. Reuse its exact token with auth_from; never transcribe JWTs.'},
+            'auth_from': {'type': 'object', 'properties': {'response': {'type': 'string'}, 'pointer': {'type': 'string', 'default': '/access_token'}}, 'required': ['response'], 'description': 'Use Bearer token copied by executor from a saved response. Keep separate names for different accounts. Cannot combine with Authorization header.'},
+            'expect_body': {'type': 'string', 'description': 'Exact response text assertion. Use empty string for 204 No Content.'},
             'expect_schema': {'description': 'JSON shape assertions on actual response: type, required, properties, items, minItems/maxItems, minLength/maxLength, minimum/maximum, enum/const. No executable expressions.'},
             'form': {'type': 'object', 'additionalProperties': {'type': 'string'}, 'description': 'Real form fields; URL-encoded without files, multipart with files. Do not combine with body.'},
             'files': {'type': 'array', 'maxItems': 8, 'items': {'type': 'object', 'properties': {
@@ -827,20 +843,14 @@ async def verify_delivery_runtime(project_id, root, plan, require_scenario=False
             """Read actual business results after restart; never replay writes."""
             current = source_digest(snapshot_files(root))
             entries = (session.state.get('execution_attempts', {}) if session else {}).values()
-            checks = {}
-            for entry in entries:
-                args = entry.get('args', {})
-                path = args.get('path', '/')
-                if (entry.get('name') == 'http_request' and entry.get('code') == 0
-                        and entry.get('source') == current and args.get('method', 'GET').upper() in ('GET', 'HEAD')
-                        and 200 <= args.get('expect_status', 200) < 300
-                        and ('expect_json' in args or 'expect_schema' in args) and args.get('requirement_ids')
-                        and path not in ('/', '/health', '/api/health', '/healthz')):
-                    checks[session_digest(args)] = args
+            from agent_recovery import final_readback_requests
+            mutation_sequence = ((session.state.get('verification_limits') or {}).get('last_http_mutation', 0)
+                                 if session else 0)
+            checks = final_readback_requests(list(entries), current, mutation_sequence)
             if not checks and plan.get('architecture', {}).get('backend', {}).get('required'):
-                return 1, '最终真实启动后缺少业务 API 数据回读检查。请通过 http_request 对实际业务 GET 接口校验结果（传 requirement_ids 和具体 expect_json），健康检查不能替代核心链路；局部单元测试不能代替最终验收。'
+                return 1, '最终真实启动后缺少最终状态的业务 API 回读。请在最后一次写入/登录/清理之后，对当前状态重新执行业务 GET（传 requirement_ids 与具体 expect_json），再完成任务；不重放修改或删除前的旧断言，健康检查不能替代核心链路。'
             reports = []
-            for args in list(checks.values())[-8:]:
+            for args in checks:
                 check_code, check_report = await http_request(project_id, args)
                 reports.append(check_report)
                 if check_code:
@@ -1087,10 +1097,8 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
     unused = {'scaffold_project', 'runtime_check', 'http_request', 'browser_check'} if ledger.plan['application_type'] in ('cli', 'library', 'artifact') else set()
     if not browser_enabled(ledger.plan):
         unused.add('browser_check')
-    normal_api_required = any(
-        item.get('verification') == 'api' and item.get('origin', 'explicit') == 'explicit'
-        for item in ledger.plan.get('requirements', [])
-    )
+    from build_tools import api_acceptance_required
+    normal_api_required = api_acceptance_required(ledger.plan)
     if build_tier == 'normal' and ledger.plan['application_type'] == 'web' and not normal_api_required:
         # A normal web job is a visual delivery unless the user explicitly
         # asked for API acceptance. Keeping http_request out of the model's
@@ -1140,6 +1148,11 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
         execution_system += '\nFor CLI/library projects configure actual build/test commands in .atoms-workspace.json; no browser or service is required.\n'
     execution_system += VERIFICATION_POLICY
     execution_system += DEPENDENCY_POLICY
+    execution_system += ('\nTreat the initial task graph as an execution hypothesis, not the user goal. '
+                         'Use actual observations to decide whether to implement, investigate, validate, or revise_tasks. '
+                         'When an approach fails, compare expected and actual results and run a discriminating experiment; '
+                         'do not invent a business defect from an incorrect test or repeatedly narrate a diagnosis. '
+                         'Stage completion may unblock later work; final requirement acceptance remains mandatory.\n')
     execution_system += '\nAcceptance prioritizes actual service startup, working preview and verified core user workflows. Ensure code quality while implementing. Do not perform a separate exhaustive file-by-file source review at acceptance; only inspect code relevant to a concrete observed build/runtime/functional failure and repair it. Preserve all explicit user requirements and real validation evidence. The harness memoizes successful browser checks by source and action fingerprint: after a successful check, do not call the same browser_check again unless source, runtime configuration, or actions changed; continue implementation or update the matching task with the existing V... evidence.\n'
     execution_system += '\nDemo-first policy: automatically fix project-local setup (including auth signing secrets); implement a usable default mock/local adapter for mockable dependencies. Only irreducible configuration for required real services belongs in user configuration TODOs. A missing-config 503 or a TODO alone is not a working mock. Complete independent features and explicitly label simulations; defer only genuinely unresolved scope. The final runnable demo is mandatory; do not claim full production acceptance for simulated or deferred capabilities.\nWhen the harness explicitly enters demo delivery/stabilization, prioritize a genuinely runnable demo and repair its build/runtime/browser failures. Preserve original requirements and evidence; leave unverified tasks open. Full completion rules still apply to COMPLETE, while the harness may separately deliver PREVIEW_READY after actual demo checks. Never claim full acceptance for a demo checkpoint.\n'
     from deliverable_contract import INSTRUCTIONS as deliverable_instructions
@@ -1186,6 +1199,11 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
     model_window = next((m['context'] for m in catalog() if m['id'] == model), 128000)
     context_ceiling = max(4096, model_window - min(32000, model_window // 4) - 4000)
     context_target = min(preferred_context_tokens(model_window, level), context_ceiling)
+    if session.state.get('context_target') != context_target:
+        # A legacy large-window compaction floor must not defeat a newly
+        # configured working target on resume.
+        session.state.pop('compaction_floor', None)
+        session.state['context_target'] = context_target
 
     async def compact_context(force=False):
         nonlocal messages, prefix_length
@@ -1220,7 +1238,8 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
             raise
         except (RuntimeError, httpx.HTTPError) as exc:
             on_step('warning', '使用任务检查点整理上下文', f'模型摘要暂不可用，仍保留任务和实际工具结果：{str(exc)[:150]}')
-        messages = session.compact(messages, prefix_length, ledger, journal, summary)
+        messages = session.compact(messages, prefix_length, ledger, journal, summary,
+                                   target_tokens=context_target, tools=execution_tools)
         prefix_length = session.state['prefix_length']
         session.state['compaction_floor'] = estimate_tokens(messages, execution_tools)
         session.save('compaction_threshold', {'tokens': session.state['compaction_floor']})
@@ -1315,38 +1334,14 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 failures = execution_guard.failures(execution_source)
                 from runtime import runtime_status
                 live_runtime = runtime_status(project_id)
-                from agent_recovery import recovery_facts, recovery_prompt, parse_recovery
+                from agent_recovery import recovery_facts, adaptive_recovery_context
                 incident = execution_guard.begin_recovery(execution_source)
                 facts = recovery_facts(root, ledger, journal, execution_source, live_runtime, failures)
-                from system_contract import diagnosis_fingerprint
-                diagnosis_key = session_digest(diagnosis_fingerprint(facts))
-                diagnoses = session.state.setdefault('system_diagnoses', {})
-                if diagnosis_key not in diagnoses:
-                    if not facts['actual_failed_operations'] and not facts['acceptance_gaps']:
-                        diagnoses[diagnosis_key] = {'layer': 'coordinator',
-                            'root_cause': '当前需求没有验收缺口，也没有当前源码的真实失败操作；无需独立模型重新诊断业务。',
-                            'next_actions': ['复用当前成功证据和已完成任务，进入最终构建、启动与交付检查；不要重新扫描或搬移业务目录。']}
-                    else:
-                        try:
-                            analysis = await await_or_stop(gateway.chat(client, AgentState.PLAN, [
-                                {'role': 'system', 'content': recovery_prompt(incident)},
-                                {'role': 'user', 'content': json.dumps(facts, ensure_ascii=False)},
-                            ], tools=[], max_tokens=model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)), should_stop)
-                            diagnoses[diagnosis_key] = parse_recovery(analysis.get('content') or '')
-                        except (ModelTemporaryError, ModelContextOverflow, ValueError):
-                            diagnoses[diagnosis_key] = None
-                result = diagnoses[diagnosis_key]
-                if result:
-                    execution_guard.recovery_diagnosed(incident, result)
-                    diagnostic += '\n当前事实的诊断及待验证假设（不是已确认根因）：' + json.dumps(result, ensure_ascii=False)
-                    on_step('result', '落实判别检查与系统修复', result['root_cause'][:1000])
-                else:
-                    diagnostic += '\n暂无有效独立诊断。根据真实缺口执行不同判别检查，不重复已知配置探测：' + json.dumps(facts['acceptance_gaps'], ensure_ascii=False)
-                if len(diagnoses) > 24:
-                    diagnoses.pop(next(iter(diagnoses)))
+                diagnostic = adaptive_recovery_context(facts, incident)
+                incident['status'] = 'acting_model_reassessing_from_evidence'
                 session.checkpoint(messages, ledger, journal, snapshot_files(root))
                 session.feedback(messages, 'recovery', diagnostic)
-                on_step("result", "正在调整问题解决路径", "检测到重复操作没有推进实现，分析原始错误并切换诊断与修复方法。")
+                on_step("result", "正在调整问题解决路径", "结合全局需求、已有实验与真实缺口，由执行模型调整路径并继续行动。")
                 # Recovery provides guidance for the next implementation
                 # action; it is not an acceptance boundary. Running the full
                 # checks here caused inspect/build/completion loops without
@@ -1357,9 +1352,9 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
             await compact_context()
             task = ledger.next_task()
             if task and not stabilizing and task["id"] != previous_focus:
-                messages.append({"role": "user", "content": "执行检查点：当前优先完成这一个任务，保留完整需求但不要反复通读整个项目。"
+                session.feedback(messages, 'focus_task', "执行检查点：聚焦当前可推进任务，持续判断整体目标与依赖；必要时用 revise_tasks 调整路径，不反复通读整个项目。"
                                  "如已经实现，运行针对性验证并用返回的 V... 证据调用 update_task 标记 done，再进入下一任务。\n"
-                                 + json.dumps(task, ensure_ascii=False)})
+                                 + json.dumps(task, ensure_ascii=False))
                 previous_focus = task["id"]
                 session.state['focus_task'] = previous_focus
             directive = '执行协调器当前指令：'
@@ -1369,7 +1364,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 instruction = directive + DELIVERY_INSTRUCTION + '\n当前唯一修复目标：' + (repair_feedback[-4000:] or '完成当前已有功能的启动与演示，不重新设计或通读项目。')
             elif task:
                 contracts = [c for c in ledger.plan.get('interfaces', []) if c['path'] in task.get('files', []) or set(c.get('consumers', [])).intersection(task.get('files', []))]
-                instruction = directive + '遵循已确定接口和依赖，只完成当前功能任务：' + json.dumps({'task':task,'interfaces':contracts}, ensure_ascii=False)
+                instruction = directive + '当前重点是以下任务；以整体用户目标为准。发现依赖、分解或验证路径不合理时，使用 revise_tasks 调整执行，不必困在此任务；不能削减原需求或放宽最终验收：' + json.dumps({'task':task,'interfaces':contracts}, ensure_ascii=False)
             from system_contract import decision_frame
             frame = decision_frame(ledger, snapshot_files(root), session.state)
             instruction = (instruction or directive) + '\n当前系统决策依据（实际状态，不是新规划）：' + json.dumps(frame, ensure_ascii=False)
@@ -1507,6 +1502,12 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                             result = f"exit_code={code}\n{output}"
                         elif name == "get_tasks":
                             result = ledger.model_context(snapshot_files(root))
+                        elif name == 'revise_tasks':
+                            result = ledger.revise_tasks(args['tasks'], args['reason'])
+                            session.state.update(plan=ledger.plan, plan_hash=session_digest(ledger.plan))
+                            session.save('execution_strategy_revision', {'reason': args['reason'], 'tasks': ledger.tasks})
+                            previous_focus = None
+                            checkpoint_due = False
                         elif name == 'read_tool_output':
                             result = session.read_output(args['output_id'], int(args.get('offset', 0)), int(args.get('limit', 6000)))
                         elif name == "update_task":
@@ -1615,10 +1616,15 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                         rejected += 1
                         result = exc.result()
                     except ValueError as exc:
-                        if name in DISCOVERY_NAMES or name in ('update_task', 'read_files', 'read_file', 'read_document', 'read_tool_output', 'replace_in_file', 'apply_patch', 'delete_file', 'write_file', 'write_files'):
+                        if name in DISCOVERY_NAMES or name in ('update_task', 'revise_tasks', 'read_files', 'read_file', 'read_document', 'read_tool_output', 'replace_in_file', 'apply_patch', 'delete_file', 'write_file', 'write_files'):
                             result = ToolArgumentError('TOOL_PRECONDITION_FAILED', str(exc), name).result()
                         else:
                             result = f"工具错误: {exc}"
+                            if name in ('runtime_check', 'http_request', 'browser_check'):
+                                code = 1
+                                failed_source = source_digest(snapshot_files(root))
+                                execution_guard.record(execution_guard.key(name, args, failed_source), name, args, failed_source, code, result)
+                                enforce_validation(name, code, result)
                     except Exception as exc:
                         result = f"工具错误: {exc}"
                         if name in ('runtime_check', 'http_request', 'browser_check'):
@@ -1778,7 +1784,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
             # A build is insufficient: verify the actual runnable result even on
             # the fully completed path, so a normal exit cannot skip demo checks.
             all_tasks_closed = not any(t['status'] not in ('done', 'deferred') for t in ledger.tasks)
-            normal_web_demo = build_tier == 'normal' and ledger.plan['application_type'] == 'web' and (stabilizing or all_tasks_closed)
+            normal_web_demo = normal_web_mode and not normal_api_required and (stabilizing or all_tasks_closed)
             if stabilizing or availability_error or all_tasks_closed:
                 from delivery_checks import resolve_scene, DeliverySceneError
                 async def scene_resolver(observed):
@@ -1793,7 +1799,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 # skips the expensive full API/browser journey unless a deeper
                 # tier or an explicit recovery run asks for it.
                 preview_only_delivery = ledger.plan['application_type'] == 'web' and bool(
-                    build_tier == 'normal' or stabilizing or availability_error or deferred_delivery)
+                    (normal_web_mode and not normal_api_required) or stabilizing or availability_error or deferred_delivery)
                 try:
                     if availability_error:
                         # Provider availability may leave TODOs; still execute real startup for demo delivery.
@@ -1917,7 +1923,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
 
 
 async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_context: str = "",
-                    on_step: Callable | None = None, history: list[dict] | None = None, expert_context: str = "", build_tier: str = "normal", enabled_tools: list[str] | None = None):
+                    on_step: Callable | None = None, history: list[dict] | None = None, expert_context: str = "", build_tier: str = "normal", enabled_tools: list[str] | None = None, resume_planning: bool = False):
     build_tier = normalize_tier(build_tier)
     root = ensure_workspace(project_id)
     gateway = ModelGateway(model, (lambda state, metrics: on_step(
@@ -1953,11 +1959,11 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
     if on_step:
         on_step("state", AgentState.UNDERSTAND.value, "理解完整需求及现有项目")
     from project_templates import planner_contract
-    template_contract = planner_contract(prompt, history)
+    template_contract = planner_contract(prompt, history, existing_files=files)
     new_project = not any(not n.startswith(".atoms/") for n in current_sources)
     project_facts = "实际项目状态：全新项目，无业务源码。必须给出确定的技术栈、frontend 目录、具体业务文件和实际命令，不能写沿用现有/若为新项目等条件。" if new_project else "实际项目状态：已有业务源码。先定位真实入口和运行配置，沿用实际技术栈与明确目录，不能写条件目录或命令说明。"
     messages = [
-        {"role": "system", "content": PLAN_INSTRUCTIONS + tool_instructions(enabled_tools if enabled_tools is not None else ['browser_check'], build_tier) + '\n模板策略（优先于通用初始化说明）：' + template_contract + "\n按真实需求规模规划：简单单页或小功能只安排 1–3 个连贯任务；功能范围按构建质量策略决定，避免不必要的后端或复杂架构。新项目只有 .atoms 文档时无需读这些初始化元数据，直接制定计划。新项目默认按 demo-first：先输出最小接口契约与前端目标预览，再接后端真实实现；不要让数据库、AI、支付或其他外部凭据阻塞页面预览。若需要后端，tasks 必须让接口契约和前端预览先行，后端接线作为后续任务；接口、模拟边界和 TODO 要明确记录。先形成完整系统设计并打通风险最高的真实链路，再集中完成其余模块；可预览不能替代完整目标。" + expert_context + change_contract(baseline) + tier_instructions(build_tier)},
+        {"role": "system", "content": PLAN_INSTRUCTIONS + tool_instructions(enabled_tools if enabled_tools is not None else ['browser_check'], build_tier) + '\n模板策略（优先于通用初始化说明）：' + template_contract + "\n按真实需求规模规划：简单单页或小功能只安排 1–3 个连贯任务；功能范围按构建质量策略决定，避免不必要的后端或复杂架构。新项目只有 .atoms 文档时无需读这些初始化元数据，直接制定计划。新项目默认按 demo-first：先输出最小接口契约与前端目标预览，再接后端真实实现；不要让数据库、AI、支付或其他外部凭据阻塞页面预览。需要后端的新项目，tasks 让接口契约和前端预览先行，后端接线作为后续任务；已有项目按真实新增能力和依赖安排任务，不重复预览初始化；接口、模拟边界和 TODO 要明确记录。先形成完整系统设计并打通风险最高的真实链路，再集中完成其余模块；可预览不能替代完整目标。" + expert_context + change_contract(baseline) + tier_instructions(build_tier)},
         {"role": "user", "content": f"完整对话：\n{history_text}\n当前需求：{prompt}\n附件参考：{media_context or '无'}\n"
          f"{project_facts}\n项目记忆：\n{saved_memory}\n现有文件：{', '.join(files[:200])}\n相关变化代码：\n{relevant}\n"
          "完成需求和架构判断。已有项目按需使用只读工具；新项目或信息充足时直接输出完整计划 JSON。"},
@@ -1965,16 +1971,42 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
     # One tool-driven planning loop covers understanding, exploration and plan.
     # Phase state survives interruption and passes verified source observations on.
     from agent_session import inventory, repair_tool_boundaries
-    phase_key = session_digest({'request': prompt, 'history': history_text, 'files': inventory(current_sources),
-                                'policy': 'incremental-v6-demo-first', 'enabled_tools': enabled_tools, 'build_tier': build_tier, 'build_policy_version': POLICY_VERSION, 'expert': expert_context, 'model': gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model})
+    phase_identity = {'request': prompt, 'files': inventory(current_sources), 'media': session_digest(media_context),
+                                'policy': 'incremental-v7-evidence-repair', 'enabled_tools': enabled_tools, 'build_tier': build_tier, 'build_policy_version': POLICY_VERSION, 'expert': expert_context, 'model': gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model}
+    context_key = session_digest(phase_identity)
+    phase_key = session_digest({**phase_identity, 'history': history_text})
     phase = session.phase('planning', phase_key, messages)
+    initialize_context = len(phase['messages']) == 2
+    previous = session.saved_phase('planning') if resume_planning else {}
+    if previous.get('request') == prompt and not previous.get('completed', True):
+        if previous.get('context_key') == context_key:
+            phase = previous
+            initialize_context = len(phase['messages']) == 2
+        else:
+            # New source/config invalidates the old transcript, but keep its
+            # draft as explicitly unverified input for the model to revise.
+            from incremental_planning import plan_object
+            candidate = previous.get('candidate')
+            if not candidate:
+                for message in reversed(previous.get('messages', [])):
+                    if message.get('role') == 'assistant' and not message.get('tool_calls'):
+                        try:
+                            candidate = plan_object(message.get('content') or '')
+                            break
+                        except ValueError:
+                            pass
+            if candidate:
+                phase['candidate'] = candidate
+                phase['messages'].append({'role': 'user', 'content': '恢复上次未完成的规划；以下草稿未经当前源码校验，以本次实际文件事实为准，可用 plan_patch 修正：\n' + json.dumps(candidate, ensure_ascii=False)})
+            phase['last_error'] = previous.get('last_error', '')
+    phase['context_key'] = context_key
     phase['request'] = prompt
     phase['incremental'] = bool(baseline)
     # Keep a normal plan compact in content, while reserving enough completion
     # budget for one complete JSON object instead of an avoidable retry.
     if not phase.get('output_budget') or phase.get('output_budget') in (8000, 12000):
         phase['output_budget'] = model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)
-    if len(phase['messages']) == 2:
+    if initialize_context:
         explicit_paths = [path for path in files if path in prompt]
         reused = verified_observations(session, current_sources, preferred_paths=explicit_paths) if baseline else {}
         phase['observations'].update(reused)
@@ -2002,18 +2034,17 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
         exploration_tools = []  # Empty new projects have no business source to explore.
     async with httpx.AsyncClient(timeout=180) as client:
         read_rounds = exploration_limit(bool(baseline)) if exploration_tools else 0
-        synthesis = bool(phase.get('synthesis'))
-        last_error = ''
-        # At most one synthesis repair is useful. A third identical planning
-        # call only repeats the same invalid JSON and consumes the budget that
-        # should be used for implementation.
-        for attempt in range(min(int(phase.get('rounds', 0)), read_rounds), read_rounds + 2):
-            if attempt >= read_rounds and not synthesis:
-                synthesis = phase['synthesis'] = True
-                messages.append({'role': 'user', 'content': '必要源码探索阶段结束。现在依据项目记忆、已读取的源码及当前要求输出可执行计划 JSON。不要再调用读取工具。未受影响的旧业务保持不变；实现阶段仍可针对设计疑问读取源码。仅输出最终 JSON，不再重复推理。design 用简洁的具体设计，避免大段源码或重复旧文档；已有项目未改变的架构和命令直接省略，不要重新展开原需求。必须提供当前 goal、requirements、tasks、design，保留足够输出预算完成整个 JSON 对象。'})
+        from planning_recovery import PlanningRecovery
+        recovery = PlanningRecovery(session, phase, read_rounds, bool(exploration_tools))
+        announced_mode = None
+        while True:
+            active_tools = exploration_tools if recovery.tools_enabled() else []
+            if recovery.mode == 'synthesis' and announced_mode != 'synthesis':
+                messages.append({'role': 'user', 'content': '现在依据实际源码观察和当前要求提交可执行计划 JSON；停止泛读，仍有事实冲突时校验恢复会重新开放只读工具。保持用户目标与全部需求；设计简洁具体，不重复历史文档。若已有计划草稿，优先用 plan_patch 局部修正，避免重生成整个计划。'})
                 if on_step:
                     on_step('result', '正在形成增量计划' if baseline else '正在形成实现计划', '复用已确认的源码观察，将当前需求整理为可执行任务与验收步骤。')
-            active_tools = [] if synthesis else exploration_tools
+            announced_mode = recovery.mode
+            recovery.before_call(messages, active_tools)
             phase['messages'] = messages
             session.save_phase('planning', phase)
             # Planning is a bounded handoff, not a second implementation
@@ -2029,7 +2060,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
             response = await phase_chat(session, gateway, client, AgentState.PLAN, messages, active_tools, 'planning', phase,
                                         min(plan_ceiling,
                                             int(phase.get('output_budget', plan_ceiling))))
-            phase['rounds'] = attempt + 1
+            recovery.record_response(response)
             phase['last_response_meta'] = response.get('_response_meta', {})
             calls = response.get('tool_calls') or []
             if calls:
@@ -2040,6 +2071,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
                 for call in calls:
                     args = {}
                     adjustments = []
+                    observed = False
                     name = call['function']['name']
                     try:
                         args = parse_tool_arguments(call, active_tools, response, adjustments)
@@ -2078,11 +2110,16 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
                             else:
                                 result = locator.execute(name, args, messages)
                         else:
-                            result = '规划阶段仅允许只读工具'
+                            raise ValueError('规划阶段仅允许只读工具')
+                        observed = True
                     except ToolArgumentError as exc:
                         result = exc.result()
                     except (ValueError, KeyError, OSError, TypeError) as exc:
                         result = f'工具错误: {exc}'
+                    if observed:
+                        paths = [item['path'] for item in args['files']] if name == 'read_files' else [args['path']] if name in {'read_file', 'read_code'} else None
+                        versions = {path: locator.entries.get(path, {}).get('sha') for path in paths} if paths is not None else None
+                        recovery.observe(name, args, result, source_versions=versions)
                     if adjustments:
                         result += '\n参数已按读取页大小调整：' + json.dumps(adjustments, ensure_ascii=False)
                     messages.append({'role': 'tool', 'tool_call_id': call['id'], 'content': session.output(call, result)})
@@ -2098,29 +2135,29 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
                 if phase['last_response_meta'].get('finish_reason') == 'length':
                     phase['output_budget'] = model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)
                     raise ValueError('计划输出达到长度限制；缩短重复设计描述，直接提交完整 JSON。下一次将使用模型阶段上限')
-                value = resolve_default_plan(plan_object(text), prompt, history, new_project=new_project)
+                value = resolve_default_plan(recovery.candidate(text), prompt, history, new_project=new_project)
                 plan = stamp_tools(stamp_plan(assemble_plan(value, baseline), build_tier), enabled_tools)
                 from system_contract import require_system_contract
                 require_system_contract(plan)
                 if baseline:
                     plan = validate_change_map(plan, locator)
-                phase.update(completed=True, plan=plan, plan_hash=session_digest(plan))
+                phase.update(completed=True, plan=plan, plan_hash=session_digest(plan), last_error='', validation_issues=[])
+                phase.pop('checkpoint_reason', None)
                 session.save_phase('planning', phase)
                 (root / '.atoms' / 'requirements.json').write_text(json.dumps(plan, ensure_ascii=False, indent=2))
                 set_workspace_owner(root, project_uid(project_id))
                 return json.dumps(plan, ensure_ascii=False)
-            except (ValueError, TypeError, AttributeError) as exc:
-                last_error = str(exc)
-                synthesis = phase['synthesis'] = True
-                if on_step:
-                    on_step('warning', '计划结构不完整，重新规划', str(exc))
-                messages.extend([{'role': 'assistant', 'content': text},
-                                 {'role': 'user', 'content': f'计划无效：{exc}。输出规定结构的完整 JSON；不要仅返回分析。'}])
+            except (ValueError, TypeError, AttributeError, KeyError) as exc:
+                messages.append({'role': 'assistant', 'content': text})
                 phase['messages'] = messages
-                phase['last_error'] = last_error
+                feedback = recovery.feedback(exc, locator)
+                messages.append({'role': 'user', 'content': feedback})
+                phase['messages'] = messages
                 session.save_phase('planning', phase)
-
-    raise RuntimeError('规划输出校验未通过，已有代码和源码观察已保留：' + (last_error or phase.get('last_error') or '模型未提交可执行计划'))
+                if on_step:
+                    on_step('recovery', '正在分析并修正计划冲突', str(exc),
+                            tool_name='plan_validation',
+                            tool_output=json.dumps({'issues': phase['validation_issues'], 'mode': recovery.mode}, ensure_ascii=False))
 
 
 def prepare_local_vision_image(path: Path) -> tuple[str, str]:

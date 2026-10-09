@@ -124,7 +124,8 @@ class RuntimeSelectionTests(unittest.IsolatedAsyncioTestCase):
                                      plan=json.dumps(self.plan), enabled_tools=[])
         self.assertNotIn('browser_check', advertised)
         self.assertIn('verified',result['summary'])
-        self.assertTrue(json.loads((self.root/'.atoms/task-state.json').read_text())['completed'])
+        self.assertEqual(result['delivery'], 'demo')
+        self.assertFalse(json.loads((self.root/'.atoms/task-state.json').read_text())['completed'])
         from agent_session import AgentSession
         state = AgentSession(self.root).state
         self.assertTrue(state['demo']['ready'])

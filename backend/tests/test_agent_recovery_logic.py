@@ -11,7 +11,7 @@ from test_agent_harness import example_plan
 
 
 class RecoveryLogicTests(unittest.TestCase):
-    def test_repeated_completion_gaps_rotate_hypotheses_and_survive_resume(self):
+    def test_recovery_preserves_experiments_without_rotating_canned_diagnoses(self):
         state = {}
         for index in range(20):
             guard = ExecutionGuard(state)
@@ -26,7 +26,7 @@ class RecoveryLogicTests(unittest.TestCase):
                 {'cause': '接口失败', 'probe': '检查响应体并沿路由追踪', 'supports': '业务请求失败', 'refutes': '预期响应通过'}],
                 'next_actions': ['执行实际接口检查，关联 R2', '根据实际差异修复并回读']}
             guard.recovery_diagnosed(incident, parse_recovery(json.dumps(diagnosis)))
-        self.assertEqual(len({r['lens'] for r in state['verification_limits']['recoveries']}), 4)
+        self.assertEqual(len({r['lens'] for r in state['verification_limits']['recoveries']}), 1)
         self.assertEqual(state['verification_limits']['recoveries'][-1]['status'], 'awaiting_real_probe_and_repair')
 
     def test_fresh_diagnosis_receives_actual_probe_and_repair_outcomes(self):

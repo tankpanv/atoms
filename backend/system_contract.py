@@ -14,6 +14,50 @@ INSTRUCTIONS = '''
 最终验收逐项检查成功路径和必要失败路径。错误路径通过只证明错误处理，不能证明成功能力；build不能代替业务验收。用户优先要求最终可启动演示：尽可能解决发现的问题；外部依赖或难解决部分可以延期/绕过，交付真实可运行的演示，并列出实现、模拟、缺失及后续配置 TODO。不因完整验收缺口停止交付，也不宣称模拟能力已通过真实服务验收。
 '''
 INSTRUCTIONS += DEPENDENCY_INSTRUCTIONS
+INSTRUCTIONS += '''
+success_assertions 只能包含实际 JSON 字面值，嵌套字段用嵌套对象，不能填写“请求中的日期”“已认证用户邮箱”等描述。
+动态数据的类型与必需字段用 success_schema，值与请求的关联在真实 http_request 的 expect_json 中断言，可引用已保存响应。
+204 无正文接口使用 success_body="empty"，不要求 JSON；带路径参数的合同保留 /api/events/{event_id}。
+前端准备与后端接线阶段的任务完成不同于整项需求通过；最终统一验证当前源码的完整接口与业务链路。
+'''
+
+
+def executable_api_contract(api):
+    """Migrate legacy prose assertions without treating prose as response data."""
+    result = dict(api)
+    assertions = dict(api.get('success_assertions') or {})
+    if api.get('success_status') == 204 and assertions == {'body': 'empty'}:
+        result['success_body'] = 'empty'
+        assertions = {}
+    notes = {}
+    concrete = {}
+    for key, value in assertions.items():
+        descriptive = isinstance(value, str) and bool(re.search(
+            r'规范化后的|已认证用户|仅当前用户|请求中的|与路径.+一致|本次新增的.+数量|已存在且未覆盖|当前用户拥有|与.+一致的', value))
+        if descriptive:
+            notes[key] = value
+        else:
+            target = concrete
+            parts = key.split('.')
+            for part in parts[:-1]:
+                target = target.setdefault(part, {})
+            target[parts[-1]] = value
+    if notes and not api.get('success_schema'):
+        raise ValueError('API 成功断言含自然语言描述，必须改成 JSON 字面值或提供 success_schema：' + api['path'])
+    if 'success_assertions' in api or concrete:
+        result['success_assertions'] = concrete
+    if notes:
+        result['success_notes'] = {**api.get('success_notes', {}), **notes}
+    return result
+
+
+def api_path_matches(contract_path, actual_path):
+    from urllib.parse import urlsplit
+    path = urlsplit(actual_path).path
+    path = re.sub(r'^/api/runtime/[^/]+(?=/|$)', '', path) or '/'
+    pattern = ''.join('[^/]+' if part.startswith('{') and part.endswith('}') else re.escape(part)
+                      for part in re.split(r'(\{[^/{}]+\})', contract_path))
+    return re.fullmatch(pattern, path) is not None
 
 
 def validate_system_contract(plan):
@@ -54,7 +98,7 @@ def validate_system_contract(plan):
         covered.update(references(journey))
     if covered != requirements:
         raise ValueError('系统用户链路未覆盖全部需求：' + ', '.join(sorted(requirements - covered)))
-    for api in contract['api_contracts']:
+    for index, api in enumerate(contract['api_contracts']):
         if not isinstance(api, dict):
             raise ValueError('API 合同必须为对象')
         references(api)
@@ -64,7 +108,9 @@ def validate_system_contract(plan):
             raise ValueError('API 合同必须使用实际 HTTP method/path')
         if isinstance(api.get('success_status'), bool) or not isinstance(api.get('success_status'), int) or not 200 <= api['success_status'] < 300:
             raise ValueError('API 成功合同必须为 2xx，不能用预期拒绝冒充成功')
-        if not ((isinstance(api.get('success_assertions'), dict) and api['success_assertions']) or (isinstance(api.get('success_schema'), dict) and api['success_schema'])):
+        api = executable_api_contract(api)
+        contract['api_contracts'][index] = api
+        if not ((isinstance(api.get('success_assertions'), dict) and api['success_assertions']) or (isinstance(api.get('success_schema'), dict) and api['success_schema']) or (api.get('success_body') == 'empty' and api['success_status'] == 204)):
             raise ValueError('API 成功合同需要具体 success_assertions')
         if not isinstance(api.get('request_fields'), list) or not isinstance(api.get('consumers'), list):
             raise ValueError('API 合同需要 request_fields 和 consumers')
@@ -156,12 +202,17 @@ def success_receipt(item):
         return False
     if item.get('kind') == 'http_request':
         response = receipt_response(item)
-        if response.get('simulated') is True:
+        if response.get('simulated') is True or response.get('passed') is False:
             return False
         try:
             payload = json.loads(response.get('body', ''))
             if isinstance(payload, dict) and payload.get('simulated') is True:
                 return False  # Useful demo evidence, not actual provider acceptance.
+            from agent_checks import contains_json
+            args = item.get('arguments', {})
+            if 'expect_json' in args and '{{http:' not in json.dumps(args['expect_json']):
+                if not contains_json(payload, args['expect_json']):
+                    return False  # Re-evaluate receipts produced before assertion fixes.
         except (ValueError, TypeError):
             pass
         path = response.get('path', item.get('command', '')).split('?')[0].rstrip('/')
@@ -181,25 +232,35 @@ def simulated_receipt(item):
         return False
 
 
-def contract_acceptance_issues(plan, evidence, source, *, strict=True):
+def contract_acceptance_issues(plan, evidence, source, *, strict=True, requirement_ids=None):
     contract = plan.get('system_contract')
     if not contract:
         return []
     current = [e for e in evidence if e.get('source_digest') == source and success_receipt(e)]
     issues = []
     for api in contract['api_contracts']:
+        api = executable_api_contract(api)
+        required = set(api['requirement_ids']) if requirement_ids is None else set(api['requirement_ids']) & requirement_ids
+        if not required:
+            continue
         if not strict:
             continue
         matching = []
         for item in current:
             response = receipt_response(item)
             args = item.get('arguments', {})
-            path = args.get('path', response.get('path', ''))
+            path = response.get('path') or args.get('path', '')
             # Runtime-prefix receipts retain the exact project-relative arguments.
-            if (item['kind'] == 'http_request' and path.split('?')[0] == api['path']
-                    and args.get('method', response.get('method', 'GET')) == api['method']
+            empty_body = api.get('success_body') == 'empty' and api['success_status'] == 204
+            asserted = ('expect_json' in args and args['expect_json'] != {}) or bool(args.get('expect_schema')) or empty_body
+            if (item['kind'] == 'http_request' and api_path_matches(api['path'], path)
+                    and args.get('method', response.get('method', 'GET')).upper() == api['method']
                     and response.get('status') == api['success_status']
-                    and (args.get('expect_json') or args.get('expect_schema')) and set(api['requirement_ids']) <= set(item['requirement_ids'])):
+                    and asserted and required <= set(item['requirement_ids'])):
+                if empty_body:
+                    if response.get('body') == '':
+                        matching.append(item)
+                    continue
                 from agent_checks import contains_json
                 from runtime_assertions import shape_issues
                 try:
@@ -221,7 +282,10 @@ def contract_acceptance_issues(plan, evidence, source, *, strict=True):
         if not matching:
             issues.append(f"缺少真实成功接口证据：{api['method']} {api['path']}（具体 JSON 断言及需求关联）；错误路径/健康检查不能替代")
     for journey in contract['journeys']:
-        if not all(any(rid in e.get('requirement_ids', []) for e in current) for rid in journey['requirement_ids']):
+        required = set(journey['requirement_ids']) if requirement_ids is None else set(journey['requirement_ids']) & requirement_ids
+        if not required:
+            continue
+        if not all(any(rid in e.get('requirement_ids', []) for e in current) for rid in required):
             issues.append(f"{journey['id']} 核心链路缺少成功结果证据：{journey['success_signal']}")
     return issues
 

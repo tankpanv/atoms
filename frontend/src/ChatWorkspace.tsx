@@ -1,5 +1,5 @@
 import ArtifactViewer, { type ArtifactEntry } from './ArtifactViewer'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, CircleCheck,
   Code2, Download, ExternalLink, File, FileCode2, FilePlus2, Folder, FolderOpen,
@@ -82,15 +82,17 @@ const filePathForStep = (step: Step) => {
   if (step.kind !== 'tool' || !['read_file', 'write_file', 'replace_in_file', 'apply_patch'].includes(step.tool_name || '') || step.tool_output?.startsWith('工具错误:') || toolFailure(step)) return ''
   try { return (JSON.parse(step.tool_input || '{}') as { path?: string }).path || '' } catch { return '' }
 }
-const editedFile = (step: Step) => {
-  if (step.kind !== 'tool' || !['write_file', 'replace_in_file', 'apply_patch'].includes(step.tool_name || '') || step.tool_output?.startsWith('工具错误:') || toolFailure(step)) return ''
+const editedFilePaths = (step: Step): string[] => {
+  if (step.kind !== 'tool' || !['write_files', 'write_file', 'replace_in_file', 'apply_patch'].includes(step.tool_name || '') || step.tool_output?.startsWith('工具错误:') || toolFailure(step)) return []
   try {
-    const input = JSON.parse(step.tool_input || '{}') as { path?: string }
-    if (input.path) return input.path
+    const input = JSON.parse(step.tool_input || '{}') as { path?: string; files?: { path?: string }[] }
+    if (step.tool_name === 'write_files') return (input.files || []).map(file => file.path).filter((path): path is string => !!path)
+    if (input.path) return [input.path]
   } catch {}
-  return step.detail.split('\n')[0]
+  return step.tool_name === 'write_files' ? [] : [step.detail.split('\n')[0]].filter(Boolean)
 }
-const editedFiles = (job?: Job) => [...new Set((job?.steps || []).map(editedFile).filter(Boolean))]
+const editedFile = (step: Step) => editedFilePaths(step)[0] || ''
+const editedFiles = (job?: Job) => [...new Set((job?.steps || []).flatMap(editedFilePaths))]
 
 function jobDuration(job: Job) {
   const elapsed = Date.parse(job.updated_at) - Date.parse(job.created_at)
@@ -289,6 +291,8 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     }
   }
   const [files, setFiles] = useState<string[]>([])
+  const [fileRefreshKey, setFileRefreshKey] = useState(0)
+  const [filesRefreshing, setFilesRefreshing] = useState(false)
   const [activeFile, setActiveFile] = useState('')
   const [fileText, setFileText] = useState('')
   const [savedText, setSavedText] = useState('')
@@ -342,6 +346,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([])
   const [openFiles, setOpenFiles] = useState<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const terminalOutputRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLIFrameElement>(null)
   const consoleSequence = useRef(0)
   const uploadRef = useRef<HTMLInputElement>(null)
@@ -378,6 +383,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   const composerAction = isBuilding ? isRestoring ? '正在还原版本' : activeJob?.stop_requested || stoppingJobId ? '正在停止构建' : '停止构建' : '发送消息'
   const latestEditStep = latestJob?.steps.slice().reverse().find(step => editedFile(step))
   const latestEditPath = latestEditStep ? editedFile(latestEditStep) : ''
+  const latestFileChangeStep = latestJob?.steps.slice().reverse().find(step => step.kind === 'tool' && ['write_files', 'write_file', 'replace_in_file', 'apply_patch', 'delete_file', 'scaffold_project', 'run_shell'].includes(step.tool_name || ''))
 
   useEffect(() => {
     let disposed = false
@@ -582,32 +588,52 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
 
 
   useEffect(() => {
-    if (tab !== 'editor') return
+    if (tab !== 'editor') { setFilesRefreshing(false); return }
     let disposed = false
-    const refreshFiles = async () => request<{ files: string[] }>(`/projects/${id}/files`).then(data => {
-      if (!disposed) {
-        setFiles(data.files)
-        const preferred = following && latestEditPath && data.files.includes(latestEditPath) ? latestEditPath : ''
-        if (preferred && preferred !== activeFile) {
-          setActiveFile(preferred)
-          setOpenFiles(current => current.includes(preferred) ? current : [...current, preferred])
-        } else if (data.files.length && !data.files.includes(activeFile)) {
-          const initial = data.files.find(file => file.endsWith('App.tsx')) || data.files[0]
-          setActiveFile(initial)
-          setOpenFiles(current => current.includes(initial) ? current : [...current, initial])
+    let loading = false
+    const controller = new AbortController()
+    const refreshFiles = async () => {
+      if (loading) return
+      loading = true
+      setFilesRefreshing(true)
+      try {
+        const data = await request<{ files: string[] }>(`/projects/${id}/files`, { signal: controller.signal, cache: 'no-store' })
+        if (!disposed) {
+          setFiles(data.files)
+          const preferred = following && latestEditPath && data.files.includes(latestEditPath) ? latestEditPath : ''
+          if (preferred && preferred !== activeFile) {
+            setActiveFile(preferred)
+            setOpenFiles(current => current.includes(preferred) ? current : [...current, preferred])
+          } else if (data.files.length && !data.files.includes(activeFile)) {
+            const initial = data.files.find(file => file.endsWith('App.tsx')) || data.files[0]
+            setActiveFile(initial)
+            setOpenFiles(current => current.includes(initial) ? current : [...current, initial])
+          }
         }
-      }
-    }).catch(error => { if (!disposed) setNotice(error.message) })
+      } catch (error) { if (!disposed) setNotice((error as Error).message) }
+      finally { loading = false; if (!disposed) setFilesRefreshing(false) }
+    }
     void refreshFiles()
     // Build steps can create files without changing the project status. Keep
     // the tree and the selected editor file current while the agent is working.
     const timer = isBuilding ? window.setInterval(() => { if (document.visibilityState === 'visible') void refreshFiles() }, 2000) : undefined
-    return () => { disposed = true; if (timer) window.clearInterval(timer) }
-  }, [id, tab, project.status, isBuilding, following, latestEditPath, latestEditStep?.id, activeFile])
+    return () => { disposed = true; controller.abort(); if (timer) window.clearInterval(timer) }
+  }, [id, tab, project.status, isBuilding, following, latestEditPath, latestFileChangeStep?.id, activeFile, fileRefreshKey])
 
   useEffect(() => {
     if (tab !== 'terminal') return
     void request<Command[]>(`/projects/${id}/commands`).then(setCommands).catch(error => setNotice(error.message))
+  }, [id, tab])
+
+  useLayoutEffect(() => {
+    if (tab !== 'terminal') return
+    const output = terminalOutputRef.current
+    if (!output) return
+    const scrollToLatest = () => { output.scrollTop = output.scrollHeight }
+    scrollToLatest()
+    const observer = new MutationObserver(scrollToLatest)
+    observer.observe(output, { childList: true, subtree: true, characterData: true })
+    return () => observer.disconnect()
   }, [id, tab])
 
   useEffect(() => {
@@ -1172,7 +1198,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         {tab === 'editor' && <div className="build-editor">
           {treeOpen && <aside className="build-file-panel">
             <div className="build-file-search"><button title="收起文件树" onClick={() => setTreeOpen(false)}><PanelLeftClose size={16} /></button><label><Search size={14} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder={searchMode === 'files' ? '搜索文件' : '搜索内容'} aria-label="搜索文件" /></label></div>
-            <div className="build-file-actions"><button className={searchMode === 'files' ? 'active' : ''} onClick={() => setSearchMode('files')}>文件名</button><button className={searchMode === 'content' ? 'active' : ''} onClick={() => setSearchMode('content')}>内容</button><span /><button title="新建文件" disabled={isBuilding} onClick={() => void createFile()}><FilePlus2 size={15} /></button><button title="上传资源" disabled={isBuilding} onClick={() => uploadRef.current?.click()}><Upload size={15} /></button><input ref={uploadRef} type="file" hidden multiple onChange={event => { void uploadFiles(event.target.files); event.target.value = '' }} /></div>
+            <div className="build-file-actions"><button className={searchMode === 'files' ? 'active' : ''} onClick={() => setSearchMode('files')}>文件名</button><button className={searchMode === 'content' ? 'active' : ''} onClick={() => setSearchMode('content')}>内容</button><span /><button title="刷新文件列表" aria-label="刷新文件列表" disabled={filesRefreshing} aria-busy={filesRefreshing} onClick={() => setFileRefreshKey(key => key + 1)}><RefreshCw size={15} className={filesRefreshing ? 'build-files-refreshing' : undefined} /></button><button title="新建文件" disabled={isBuilding} onClick={() => void createFile()}><FilePlus2 size={15} /></button><button title="上传资源" disabled={isBuilding} onClick={() => uploadRef.current?.click()}><Upload size={15} /></button><input ref={uploadRef} type="file" hidden multiple onChange={event => { void uploadFiles(event.target.files); event.target.value = '' }} /></div>
             {searchMode === 'files' ? <FileTree files={files} activeFile={activeFile} search={search} onSelect={selectFile} /> : <div className="build-search-results">{search.trim() ? searchResults.length ? searchResults.map((match, index) => <button key={index} onClick={() => selectFile(match.path)}><strong>{match.path}:{match.line}</strong><span>{match.text.trim()}</span></button>) : <p>没有匹配内容</p> : <p>输入关键词搜索项目代码</p>}</div>}
             <button className="build-download" onClick={() => void downloadSource()}><Download size={15} /> 下载项目</button>
           </aside>}
@@ -1180,7 +1206,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         </div>}
         {tab === 'planner' && <div className="build-tool-panel"><div className="build-tool-panel-head"><ListTodo size={17} /><strong>计划器</strong><span>Agent 任务阶段</span></div><div className="build-planner-content">{jobs.length ? [...jobs].reverse().map(job => <section key={job.id}><h3>{job.prompt}</h3>{job.steps.filter(step => step.kind === 'state' || step.kind === 'thinking' || step.kind === 'plan').map(step => <div className="build-planner-step" key={step.id}><CircleCheck size={15} className={step.label === 'COMPLETE' ? 'done' : ''} /><div><strong>{stepLabel(step)}</strong>{stepDetail(step) && <p>{stepDetail(step)}</p>}</div></div>)}</section>) : <p>发送需求后，这里会显示 Agent 的理解、实现、验证和复核阶段。</p>}</div></div>}
         {tab === 'notebook' && <div className="build-tool-panel"><div className="build-tool-panel-head"><NotebookPen size={17} /><strong>笔记本</strong><span>仅保存在此项目工作区</span></div><textarea className="build-notebook" value={notebookText} onChange={event => updateNotebook(event.target.value)} placeholder="记录项目约定、待办事项或开发备注…" /></div>}
-        {tab === 'terminal' && <div className="build-terminal"><div className="build-terminal-tabs"><span>工作区终端 · Agent 全过程</span></div><div className="build-terminal-output">{runtimeOutput && <><h3>开发服务日志</h3><div><pre>{runtimeOutput}</pre></div></>}{terminalSteps.length > 0 && <><h3>智能体全过程日志</h3>{terminalSteps.map(step => <div key={step.id}><span>{stepLabel(step)}</span>{stepDetail(step) && <pre>{stepDetail(step)}</pre>}</div>)}</>}{commands.length > 0 && <><h3>手动命令</h3>{commands.map(entry => <div key={entry.id}><span>$ {entry.command}</span><small>退出码 {entry.exit_code}</small>{entry.output && <pre>{entry.output}</pre>}</div>)}</>}{!runtimeOutput && !terminalSteps.length && !commands.length && <p>在下方运行项目命令，或查看智能体的构建活动。</p>}</div><div className="build-terminal-compose"><span>$</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void runTerminal() }} placeholder="例如 npm test、npm run build 或 ls -la" aria-label="工作区命令" disabled={working || isBuilding} /><button disabled={!terminalInput.trim() || working || isBuilding} onClick={() => void runTerminal()}>运行</button></div></div>}
+        {tab === 'terminal' && <div className="build-terminal"><div className="build-terminal-tabs"><span>工作区终端 · Agent 全过程</span></div><div className="build-terminal-output" ref={terminalOutputRef}>{runtimeOutput && <><h3>开发服务日志</h3><div><pre>{runtimeOutput}</pre></div></>}{terminalSteps.length > 0 && <><h3>智能体全过程日志</h3>{terminalSteps.map(step => <div key={step.id}><span>{stepLabel(step)}</span>{stepDetail(step) && <pre>{stepDetail(step)}</pre>}</div>)}</>}{commands.length > 0 && <><h3>手动命令</h3>{commands.map(entry => <div key={entry.id}><span>$ {entry.command}</span><small>退出码 {entry.exit_code}</small>{entry.output && <pre>{entry.output}</pre>}</div>)}</>}{!runtimeOutput && !terminalSteps.length && !commands.length && <p>在下方运行项目命令，或查看智能体的构建活动。</p>}</div><div className="build-terminal-compose"><span>$</span><input value={terminalInput} onChange={event => setTerminalInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void runTerminal() }} placeholder="例如 npm test、npm run build 或 ls -la" aria-label="工作区命令" disabled={working || isBuilding} /><button disabled={!terminalInput.trim() || working || isBuilding} onClick={() => void runTerminal()}>运行</button></div></div>}
         {filePreview && <div className="build-file-preview-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) closeFilePreview() }}><div className="build-file-preview" role="dialog" aria-modal="true" aria-label={`查看 ${filePreview.name}`}><header><strong>{filePreview.name}</strong><button title="关闭" onClick={closeFilePreview}><X size={17} /></button></header>{filePreview.text !== undefined ? <pre>{filePreview.text}</pre> : filePreview.mime.startsWith('image/') ? <img src={filePreview.url} alt={filePreview.name} /> : filePreview.mime === 'application/pdf' ? <iframe src={filePreview.url} title={filePreview.name} /> : <div className="build-file-preview-download"><p>此文件类型不支持内嵌预览。</p><a href={filePreview.url} download={filePreview.name}>下载文件</a></div>}</div></div>}
         {pendingDelete && <div className="build-file-preview-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setPendingDelete(null) }}><div className="build-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="build-delete-title"><h2 id="build-delete-title">确认删除</h2><p>确定删除“{pendingDelete.name}”吗？{pendingDelete.kind === 'project' ? '项目及其工作区将被永久删除。' : '此操作无法撤销。'}</p><footer><button onClick={() => setPendingDelete(null)}>取消</button><button className="danger" onClick={() => void confirmDirectoryDelete()}>删除</button></footer></div></div>}
         {notice && <div className="build-notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="关闭提示"><X size={15} /></button></div>}

@@ -105,11 +105,13 @@ services:
       AGENT_BUILD_NORMAL_MULTIPLIER: ${AGENT_BUILD_NORMAL_MULTIPLIER:-1}
       AGENT_BUILD_DEEP_MULTIPLIER: ${AGENT_BUILD_DEEP_MULTIPLIER:-2}
       AGENT_BUILD_ADVANCED_MULTIPLIER: ${AGENT_BUILD_ADVANCED_MULTIPLIER:-3}
-      # Keep a coherent multi-file working set by default. The agent still
-      # clamps this to the selected model's hard context limit; override for
-      # constrained providers or cost-sensitive deployments.
+      # Auto chooses a working set by task complexity, within model limits.
+      # An explicit integer overrides the target for this deployment.
       AGENT_CONTEXT_TOKENS: ${AGENT_CONTEXT_TOKENS:-auto}
       AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-}
+      AGENT_PLANNING_MAX_CALLS: ${AGENT_PLANNING_MAX_CALLS:-16}
+      AGENT_PLANNING_MAX_TOKENS: ${AGENT_PLANNING_MAX_TOKENS:-240000}
+      AGENT_PLANNING_TIMEOUT_SECONDS: ${AGENT_PLANNING_TIMEOUT_SECONDS:-480}
       AGENT_SECRET: ${AGENT_SECRET:-}
       AGENT_IMAGE: ${AGENT_IMAGE:-atoms-demo-backend}
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-atoms-demo}

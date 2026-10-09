@@ -25,7 +25,7 @@ def failure_facts(name, output):
         return output[-2000:]
     try:
         value = json.loads(output[output.index('{'):])
-        facts = {key:value[key] for key in ('error','errors','failed_responses','status','expected_status','body','controls','text') if key in value}
+        facts = {key:value[key] for key in ('error','errors','failed_responses','status','expected_status','body','controls','text','assertion_errors','auth_response','next_action') if key in value}
         for key in ('error','body','text'):
             if isinstance(facts.get(key),str): facts[key] = facts[key][:2500]
         for key in ('errors','failed_responses','controls'):
@@ -45,6 +45,9 @@ class ExecutionGuard:
         self.entries = state.setdefault('execution_attempts', {})
         self.progress = state.setdefault('execution_progress', {})
         self.limits = state.setdefault('verification_limits', {'failures': {}, 'signatures': {}, 'policy_rejections': 0})
+        for sequence, entry in enumerate(self.entries.values(), 1):
+            entry.setdefault('sequence', sequence)
+        self.limits.setdefault('attempt_sequence', max((e['sequence'] for e in self.entries.values()), default=0))
 
     def request_recovery(self, name, output, reason):
         self.limits['pending_recovery'] = {
@@ -78,14 +81,11 @@ class ExecutionGuard:
         }
         self.limits['recovery_round'] = self.limits.get('recovery_round', 0) + 1
         incident['round'] = self.limits['recovery_round']
-        lenses = ('证据与验证合同：区分期望错误、陈旧证据、缺失关联与真实业务失败',
-                  '逆向因果追踪：从期望结果沿数据回读、写入、API、调用方追踪第一个差异',
-                  '最小判别实验：隔离请求载荷、编码、认证、依赖和环境，证伪至少两种竞争假设',
-                  '生命周期与不变量：检查运行版本、服务重启、持久化、状态转换及边界条件')
-        incident['lens'] = lenses[(incident['round'] - 1) % len(lenses)]
+        incident['lens'] = '依据当前阻塞及前次实验选择诊断方法；必要时调整任务依赖，目标是完整交付而非重复验证。'
         history = self.limits.setdefault('recoveries', [])
         incident['previous_attempts'] = [
             {'lens': item['lens'], 'diagnosis': item.get('diagnosis'), 'error': item['error'],
+             'status': item.get('status'),
              'actual_observations': item.get('observations', [])}
             for item in history[-3:]]
         history.append(incident)
@@ -138,30 +138,44 @@ class ExecutionGuard:
 
     def record(self, key, name, args, source, code, output):
         old = self.entries.get(key, {})
+        sequence = self.limits.get('attempt_sequence', 0) + 1
+        self.limits['attempt_sequence'] = sequence
+        if name == 'http_request' and args.get('method', 'GET').upper() not in ('GET', 'HEAD'):
+            self.limits['last_http_mutation'] = sequence
         if key not in self.entries and len(self.entries) >= 64:
             self.entries.pop(next(iter(self.entries)))
         if code != 0 and name in ('browser_check','http_request','runtime_check'):
             facts = failure_facts(name,output)
             if isinstance(facts,dict): output = json.dumps(facts,ensure_ascii=False)
         self.entries[key] = {'name': name, 'args': args, 'source': source, 'code': code,
+                             'sequence': sequence,
                              'output': output[-12000:], 'count': old.get('count', 0) + 1,
                              'probe_revision': self.limits.get('probe_revision', 0)}
 
     def observe(self, source, tasks, evidence=()):
         # New receipt IDs, repeated summaries and task notes are not progress.
-        verified = sorted({(v['kind'], rid) for v in evidence
-                           if v.get('exit_code') == 0 and not v.get('historical') and v.get('source_digest') == source
+        from system_contract import success_receipt
+        def operation(v):
+            command = re.sub(r'^/api/runtime/[^/]+(?=/|$)', '', v.get('command', ''))
+            return ((v.get('arguments') or {}).get('method', 'GET'), command)
+        verified = sorted({(v['kind'], rid, operation(v)) for v in evidence
+                           if v.get('source_digest') == source and success_receipt(v)
                            for rid in v.get('requirement_ids', [])})
         current = digest({'source': source, 'tasks': [(t['id'], t['status']) for t in tasks], 'verified': verified})
-        same = current == self.progress.get('fingerprint')
+        history = self.progress.setdefault('recent_states', [])
+        # Returning to an already observed source/task/proof state is a cycle,
+        # not fresh progress merely because the immediately previous hash differs.
+        same = current == self.progress.get('fingerprint') or current in history
         self.progress['stagnant'] = self.progress.get('stagnant', 0) + 1 if same else 0
+        history.append(current)
+        del history[:-64]
         self.progress['fingerprint'] = current
         stagnant = self.progress['stagnant']
         # Recovery prompts alone are not progress. Several opportunities to
         # inspect, probe and repair must eventually yield a concrete result.
         if stagnant >= 18:
             from agent_delivery import DeliveryLimitReached
-            raise DeliveryLimitReached('连续 18 轮没有源码变化、任务状态变化或新的需求成功验证，已停止无进展循环并保存检查点。'
+            raise DeliveryLimitReached('连续 18 轮重复已观察的源码、任务和需求验证状态，已停止无进展循环并保存检查点。'
                                        + self.diagnostic(source))
         return bool(self.limits.get('pending_recovery')) or stagnant in (3, 6, 10) or (stagnant > 10 and (stagnant - 10) % 3 == 0)
 
@@ -171,7 +185,7 @@ class ExecutionGuard:
 
     def diagnostic(self, source=None):
         failures = self.failures(source)
-        return ('执行恢复：连续操作未改变源码或任务状态。停止重复相同的构建/测试/状态查询。'
+        return ('执行恢复：连续操作没有形成新的有效状态或成功证据。停止重复相同的构建/测试/状态查询。'
                 '先诊断故障层：计划/协调器命令、工作区配置、依赖/环境、运行时，最后才是业务代码。'
                 '针对最新错误定位其来源，解释为什么上次修改无效，然后做一个可验证的不同修复。'
                 '若实际代码正确而验收配置错误，修复实际运行配置；不要削减功能、删除测试、伪造成功或重建项目。'

@@ -169,8 +169,9 @@ class RealExecutionTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self,*args):pass
             async def chat(self,client,state,messages,tools=None,**kwargs):
                 if state == AgentState.PLAN:
-                    diagnoses.append(messages)
-                    return {'content':json.dumps({'layer':'command','root_cause':'missing_runner is not installed; this is a runner error, not broken Python business code','next_actions':['Run python greet.py and associate R1 evidence']})}
+                    raise AssertionError('Recovery must stay with the acting model and tools')
+                if 'failed_operations' in str(messages):
+                    diagnoses.append(str(messages))
                 if not sequence:raise AssertionError(json.dumps(messages[-4:], ensure_ascii=False))
                 return sequence.pop(0)
         with tempfile.TemporaryDirectory() as temporary:
@@ -183,7 +184,7 @@ class RealExecutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(executed.count('missing_runner'),2)
             self.assertGreaterEqual(len(diagnoses),1)
             self.assertIn('command not found',str(diagnoses[0]))
-            self.assertIn('actual_failed_operations',str(diagnoses[0]))
+            self.assertIn('missing_runner',str(diagnoses[0]))
             self.assertTrue(json.loads((root/'.atoms/task-state.json').read_text())['completed'])
 
     async def test_timeout_keeps_output_for_root_cause_diagnosis(self):

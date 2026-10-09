@@ -64,6 +64,11 @@ def assemble_plan(value, baseline):
     if not isinstance(value, dict):
         raise ValueError('计划必须为 JSON 对象')
     plan = copy.deepcopy(value)
+    # Empty optional command lists do not require another model call. Never
+    # invent a build/start command, service, or successful verification.
+    if isinstance(plan.get('commands'), dict):
+        plan['commands'].setdefault('bootstrap', [])
+        plan['commands'].setdefault('test', [])
     if baseline:
         for key in ('application_type', 'architecture', 'commands', 'task_type', 'deliverables'):
             if key not in plan:

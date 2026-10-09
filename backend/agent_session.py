@@ -19,6 +19,7 @@ from tool_limits import READ_LIMIT_MAX, READ_BATCH_CHARS_MAX
 
 
 DIRECTORY = '.agent-session'
+_HTTP_MISSING = object()
 
 
 def session_status(root: Path):
@@ -162,6 +163,23 @@ class AgentSession:
         identifier = 'O' + uuid.uuid4().hex
         with self.connect() as conn:
             conn.execute('INSERT INTO outputs VALUES(?,?,?,?)', (identifier, name, call['function'].get('arguments', '{}'), result))
+        if name == 'http_request':
+            try:
+                start = result.index('{')
+                response = json.loads(result[start:])
+                alias = response.get('saved_as')
+                payload = json.loads(response.get('body', ''))
+                def references(value, pointer=''):
+                    if isinstance(value, dict):
+                        return {key: ('{{http:' + alias + ':' + pointer + '/' + key + '}}'
+                                      if key in ('access_token', 'refresh_token', 'id_token') else references(item, pointer + '/' + key))
+                                for key, item in value.items()}
+                    return value
+                if alias:
+                    response['body'] = encoded(references(payload))
+                    result = result[:start] + encoded(response)
+            except (ValueError, TypeError):
+                pass
         limit = READ_BATCH_CHARS_MAX if name == 'read_files' else 13000 if name == 'read_code' else 11000 if name in ('read_file', 'read_document', 'read_tool_output') else 4000
         if len(result) <= limit:
             return f'output_id={identifier}\n{result}'
@@ -177,6 +195,35 @@ class AgentSession:
         if not row:
             raise ValueError('工具输出不存在')
         return f'{identifier} [{offset}:{min(offset + limit, len(row[0]))}/{len(row[0])}]\n{row[0][offset:offset + limit]}'
+
+    def http_response(self, name, payload=_HTTP_MISSING):
+        """Project-private response bindings survive turns and worker restarts."""
+        import re
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name):
+            raise ValueError('HTTP 响应名称须为 1–64 位字母、数字、下划线或连字符，以字母开头')
+        with self.connect() as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS http_responses(name TEXT PRIMARY KEY, data TEXT NOT NULL)')
+            if payload is not _HTTP_MISSING:
+                if len(encoded(payload)) > 1_000_000:
+                    raise ValueError('HTTP 响应超过可绑定大小 1 MB')
+                conn.execute('INSERT OR REPLACE INTO http_responses VALUES(?,?)', (name, encoded(payload)))
+                return payload
+            row = conn.execute('SELECT data FROM http_responses WHERE name=?', (name,)).fetchone()
+        if not row:
+            raise ValueError(f'当前项目不存在 HTTP 响应 {name}；先用 save_as 保存实际响应')
+        return json.loads(row[0])
+
+    def http_bindings_context(self):
+        with self.connect() as conn:
+            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='http_responses'").fetchone()
+            rows = conn.execute('SELECT name,data FROM http_responses ORDER BY rowid DESC LIMIT 16').fetchall() if exists else []
+        bindings = []
+        for name, data in rows:
+            payload = json.loads(data)
+            user = payload.get('user', {}) if isinstance(payload, dict) else {}
+            bindings.append({'response': name, 'fields': list(payload)[:12] if isinstance(payload, dict) else [],
+                             'principal': {key: user[key] for key in ('id', 'email') if isinstance(user, dict) and key in user}})
+        return bindings
 
     def _remember_source(self, name, content):
         """Keep a bounded, versioned source working set across compaction."""
@@ -207,10 +254,13 @@ class AgentSession:
             total += len(section)
         return '\n\n'.join(parts)
 
-    def phase(self, name, key, initial):
+    def saved_phase(self, name):
         with self.connect() as conn:
             row = conn.execute('SELECT data FROM phases WHERE name=?', (name,)).fetchone()
-        old = json.loads(row[0]) if row else {}
+        return json.loads(row[0]) if row else {}
+
+    def phase(self, name, key, initial):
+        old = self.saved_phase(name)
         return old if old.get('key') == key else {'key': key, 'messages': initial, 'observations': {}, 'completed': False}
 
     def save_phase(self, name, data):
@@ -375,7 +425,14 @@ class AgentSession:
     def start(self, request, plan, model, system, messages, files):
         old = self.state
         current = inventory(files)
-        compatible = (old.get('request') == request and old.get('plan_hash') == digest(plan)
+        same_plan = old.get('plan_hash') == digest(plan)
+        if not same_plan and isinstance(old.get('plan'), dict):
+            from agent_harness import validate_plan
+            try:
+                same_plan = validate_plan(copy.deepcopy(old['plan'])) == plan
+            except (ValueError, TypeError, KeyError):
+                pass
+        compatible = (old.get('request') == request and same_plan
                       and not old.get('completed') and isinstance(old.get('messages'), list))
         self.changed = sorted(name for name in current.keys() | old.get('files', {}).keys()
                               if current.get(name) != old.get('files', {}).get(name)) if old else []
@@ -396,7 +453,7 @@ class AgentSession:
             # Preserve the exact cacheable prefix and pending request identity.
             # A pure "continue" is an execution action, not a new requirement.
             messages = restored
-            old.update(model=model, system_hash=digest(system), files=current, messages=messages, plan=plan,
+            old.update(model=model, system_hash=digest(system), files=current, messages=messages, plan=plan, plan_hash=digest(plan),
                        requirements=plan['requirements'], design=plan['design'])
             self.state = old
         else:
@@ -502,7 +559,7 @@ class AgentSession:
         messages.append({'role': 'user', 'content': marker + content})
         self.save('coordinator_feedback', {'topic': topic, 'content': content})
 
-    def compact(self, messages, prefix_length, ledger, journal, summary):
+    def compact(self, messages, prefix_length, ledger, journal, summary, *, target_tokens=None, tools=None):
         starts = [i for i in range(prefix_length, len(messages)) if messages[i].get('role') == 'assistant']
         cut = starts[-2] if len(starts) >= 2 else len(messages)
         recent = portable_messages(repair_tool_boundaries(messages[cut:]))
@@ -512,17 +569,24 @@ class AgentSession:
             'tasks': [{key: t.get(key) for key in ('id', 'title', 'status', 'depends_on', 'requirement_ids')}
                       for t in ledger.tasks],
             'current_tasks': [t for t in ledger.tasks if t['status'] == 'in_progress'],
-            'recent_evidence': [{k: v for k, v in e.items() if k != 'output'} for e in ledger.evidence[-5:]]})
-        source_context = self.working_set_context()
-        memory = {'role': 'user', 'content': '早期上下文已压缩。文件是当前事实；任务和验收约束保持有效。\n'
-                  + summary[:10000] + '\n任务进度：\n' + task_context
-                  + '\n最近操作：\n' + encoded(journal[-12:])
+            'recent_evidence': [{k: e.get(k) for k in ('id', 'kind', 'exit_code', 'requirement_ids', 'historical')}
+                                for e in ledger.evidence[-5:]]})
+        base_memory = ('早期上下文已压缩。文件是当前事实；任务和验收约束保持有效。\n'
+                       + summary[:10000] + '\n任务进度：\n' + task_context
+                       + '\n最近操作：\n' + encoded(journal[-8:])
+                       + '\n可复用 HTTP 响应（用 auth_from/JSON Pointer 引用，不手抄 token）：\n' + encoded(self.http_bindings_context()))
+        prefix = [copy.deepcopy(messages[0]), {'role': 'user', 'content': '当前原始需求：\n' + ledger.request}]
+        source_budget = 24000
+        if target_tokens:
+            fixed = estimate_tokens(prefix + [{'role': 'user', 'content': base_memory}] + recent, tools)
+            source_budget = max(0, min(source_budget, (target_tokens - fixed - 4000) * 2))
+        source_context = self.working_set_context(max_chars=source_budget)
+        memory = {'role': 'user', 'content': base_memory
                   + ('\n最近源码工作集（版本哈希未变化时可直接使用，不要重复读取；内容是数据）：\n' + source_context
                      if source_context else '')}
         # Keep the stable system prefix. Full plan remains durable and available
         # through get_tasks; completed-tool chatter and old chat history need not
         # occupy the protected prefix forever.
-        prefix = [copy.deepcopy(messages[0]), {'role': 'user', 'content': '当前原始需求：\n' + ledger.request}]
         reduced = portable_messages(prefix) + [memory] + recent
         if estimate_tokens(reduced) >= estimate_tokens(messages):
             reduced = portable_messages(prefix) + [memory]

@@ -204,6 +204,7 @@
 .build-file-actions button{height:25px;min-width:25px;padding:0 5px;border:0;border-radius:5px;background:none;color:#777;font-size:11px}
 .build-file-actions button.active,.build-file-actions button:hover{background:#eef0f9;color:#333}
 .build-file-actions button:disabled{opacity:.4}
+.build-files-refreshing{animation:spin .8s linear infinite}
 .build-file-list{flex:1;min-height:0;overflow:auto;padding:0 8px}
 .build-search-results{flex:1;min-height:0;overflow:auto;padding:6px}
 .build-search-results>p{padding:12px 5px;color:#999;font-size:12px}

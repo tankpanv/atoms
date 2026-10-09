@@ -280,6 +280,13 @@ def provider(): return JSONResponse({'detail':'AI 服务未配置，请设置 OP
 
     @unittest.skipUnless(os.getenv('RUN_CLI_SMOKE') == '1', 'requires real npm downloads and Chromium')
     async def test_real_cli_fullstack_crud_reload_and_restart(self):
+        await self.fullstack_crud_reload_and_restart()
+
+    @unittest.skipUnless(os.getenv('RUN_TEMPLATE_SMOKE') == '1', 'requires preinstalled template dependencies and Chromium')
+    async def test_real_template_fullstack_crud_reload_and_restart(self):
+        await self.fullstack_crud_reload_and_restart(use_template=True)
+
+    async def fullstack_crud_reload_and_restart(self, use_template=False):
         self.declare_api_dependencies()
         # Exercise the actual project Unix identity, not root, in the Docker smoke run.
         if os.geteuid() == 0:
@@ -287,11 +294,15 @@ def provider(): return JSONResponse({'detail':'AI 服务未配置，请设置 OP
             os.chmod(self.root, 0o700)
             self.patches[2].stop()
             self.patches[3].stop()
-        code, output = await scaffold_project(self.project_id)
-        self.assertEqual(code, 0, output)
-        self.assertTrue((self.root / 'frontend/tsconfig.app.json').exists())
+        if use_template:
+            from project_templates import install_template
+            install_template(self.root, 'fullstack-v1')
+        else:
+            code, output = await scaffold_project(self.project_id)
+            self.assertEqual(code, 0, output)
+        self.assertTrue((self.root / ('frontend/tsconfig.json' if use_template else 'frontend/tsconfig.app.json')).exists())
         self.assertTrue((self.root / 'frontend/src/main.tsx').exists())
-        (self.root / 'backend/app').mkdir(parents=True)
+        (self.root / 'backend/app').mkdir(parents=True, exist_ok=True)
         (self.root / 'backend/app/main.py').write_text('''import os, sqlite3
 from pathlib import Path
 from fastapi import FastAPI
@@ -315,8 +326,8 @@ def create(event: Event):
         cursor = conn.execute('INSERT INTO events(title) VALUES (?)', (event.title,))
         return {'id': cursor.lastrowid, 'title': event.title}
 ''')
-        (self.root / 'frontend/src/api').mkdir()
-        (self.root / 'frontend/src/pages').mkdir()
+        (self.root / 'frontend/src/api').mkdir(exist_ok=True)
+        (self.root / 'frontend/src/pages').mkdir(exist_ok=True)
         (self.root / 'frontend/src/api/events.ts').write_text('''export type CalendarEvent = {id:number;title:string};
 const endpoint = import.meta.env.BASE_URL + 'api/events';
 export async function listEvents():Promise<CalendarEvent[]> { return (await fetch(endpoint)).json() }

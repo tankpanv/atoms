@@ -358,11 +358,13 @@ async def process_project_queue(project_id: uuid.UUID):
                     on_step("result", "图片识别完成", current_media_context.split("。以下是视觉模型的参考描述", 1)[-1].strip() if "。以下是视觉模型的参考描述" in current_media_context else current_media_context)
                 on_step("thinking", "Mike 正在规划需求", "")
                 same_experts = not previous_job or previous_job['expert_snapshots'] == job['expert_snapshots']
-                continuation = resumable_plan(ensure_workspace(project_id), job['prompt'])
+                from planning_recovery import unfinished_planning_request
+                planning_request = unfinished_planning_request(ensure_workspace(project_id), job['prompt'])
+                continuation = None if planning_request else resumable_plan(ensure_workspace(project_id), job['prompt'])
                 build_tier = normalize_tier(job.get('build_tier'))
                 original_prompt, saved_plan = continuation_for_tier(
                     continuation, build_tier, reuse_allowed=not images and not documents and same_experts)
-                effective_prompt = original_prompt or job['prompt']
+                effective_prompt = planning_request or original_prompt or job['prompt']
                 on_step('result', f'{LABELS[build_tier]}档构建', '按所选档位规划、实现并验证完整需求')
                 if saved_plan is not None:
                     on_step('state', AgentState.UNDERSTAND.value, '继续上一次未完成的原始需求')
@@ -370,7 +372,7 @@ async def process_project_queue(project_id: uuid.UUID):
                     on_step('state', AgentState.PLAN.value, '沿用原需求、架构与任务依赖，保留已完成进度')
                     plan = json.dumps(saved_plan, ensure_ascii=False)
                 else:
-                    plan = await await_or_stop(make_plan(project_id, effective_prompt, job["model"], media_context, on_step, history, expert_context, build_tier=build_tier, enabled_tools=job.get('enabled_tools', [])), should_stop)
+                    plan = await await_or_stop(make_plan(project_id, effective_prompt, job["model"], media_context, on_step, history, expert_context, build_tier=build_tier, enabled_tools=job.get('enabled_tools', []), resume_planning=bool(planning_request) and not images and not documents and same_experts), should_stop)
                 if should_stop():
                     raise AgentStopped()
                 on_step("plan", "Mike 已将计划交给 Alex", plan)
@@ -404,7 +406,7 @@ async def process_project_queue(project_id: uuid.UUID):
                 on_step("version", f"版本 {next_version} " + ("可演示" if result.get("delivery") == "demo" else "已完成"), "代码与真实验证结果已保存，可继续优化。")
             except DeliveryLimitReached as exc:
                 detail = str(exc)
-                on_step('state', AgentState.STOPPED.value, '已达到执行时间或资源预算，检查点已保存')
+                on_step('state', AgentState.STOPPED.value, getattr(exc, 'state_detail', '已达到执行时间或资源预算，检查点已保存'))
                 with connection() as conn:
                     current = conn.execute("SELECT status FROM projects WHERE id=%s FOR UPDATE", (project_id,)).fetchone()
                     if not current or current['status'] == 'deleting':
@@ -413,7 +415,7 @@ async def process_project_queue(project_id: uuid.UUID):
                     conn.execute("UPDATE projects SET status=CASE WHEN preview_html='' THEN 'stopped' ELSE 'ready' END,updated_at=NOW() WHERE id=%s AND status<>'deleting'", (project_id,))
                     conn.execute("INSERT INTO messages(id,project_id,role,agent,content,build_tier) VALUES(%s,%s,'assistant','Alex',%s,%s)",
                                  (uuid.uuid4(), project_id, detail, job.get("build_tier", "normal")))
-                on_step('stop', '本次执行预算已用尽', '代码、实际验证证据及恢复诊断已保存；未完成部分不会标记完成。')
+                on_step('stop', getattr(exc, 'stop_label', '本次执行预算已用尽'), getattr(exc, 'stop_detail', '代码、实际验证证据及恢复诊断已保存；未完成部分不会标记完成。'))
             except AgentStopped:
                 on_step("state", AgentState.STOPPED.value, "用户已停止任务")
                 with connection() as conn:

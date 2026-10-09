@@ -109,7 +109,7 @@ class HarnessTests(unittest.TestCase):
         }
         plan['requirements'].append({
             'id': 'R2', 'description': '服务端生成',
-            'acceptance': ['请求接口返回结果'], 'verification': 'api'
+            'acceptance': ['请求接口返回结果'], 'verification': 'api', 'origin': 'detail'
         })
         plan['tasks'].append({
             'id': 'T2', 'title': '服务适配器', 'requirement_ids': ['R2'],

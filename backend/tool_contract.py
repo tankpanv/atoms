@@ -5,7 +5,7 @@ The schema subset here is the subset used by the Agent's tool definitions.
 """
 import json
 import math
-from tool_limits import SHELL_TIMEOUT_MAX, READ_LIMIT_MAX, READ_BATCH_MAX, READ_BATCH_CHARS_MAX, WRITE_BATCH_MAX
+from tool_limits import SHELL_COMMAND_MAX, SHELL_TIMEOUT_MAX, READ_LIMIT_MAX, READ_BATCH_MAX, READ_BATCH_CHARS_MAX, WRITE_BATCH_MAX
 
 
 class ToolArgumentError(ValueError):
@@ -18,7 +18,7 @@ class ToolArgumentError(ValueError):
             hint = '本响应被截断，先拆小当前调用并生成完整 JSON；只重新提交未执行的调用。'
         else:
             hint = {
-                'run_shell': f'提供字符串 command；timeout 是正整数秒，超过 {SHELL_TIMEOUT_MAX} 秒会自动限到上限。命令只执行一次，超时后检查日志并拆分长步骤。',
+                'run_shell': f'提供 1–{SHELL_COMMAND_MAX} 字符的字符串 command；timeout 是正整数秒，超过 {SHELL_TIMEOUT_MAX} 秒会自动限到上限。命令只执行一次，超时后检查日志并拆分长步骤。',
                 'write_files': f'每项必须提供明确的 path 和完整 content，支持 1–{WRITE_BATCH_MAX} 个文件；建议大代码拆小批。整批校验通过前不会写入。',
                 'write_file': '明确提供 path 和完整字符串 content；不能推断缺失路径。已有文件局部修改可使用 replace_in_file。',
                 'read_file': f'从 list_files 确认准确路径；offset 为非负字符偏移，limit 为正整数，单页最多 {READ_LIMIT_MAX} 字符，按实际返回的区间继续分页。',

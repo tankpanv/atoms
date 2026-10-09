@@ -276,46 +276,76 @@ class CodeLocator:
         raise ValueError('未知代码定位工具')
 
 
+class ChangeMapError(ValueError):
+    """All current mapping conflicts, with facts usable by the model."""
+    def __init__(self, issues):
+        self.issues = issues
+        self.needs_evidence = any(i['code'] in {'missing_source', 'existing_target', 'missing_map', 'task_mapping', 'coverage'} for i in issues)
+        super().__init__('；'.join(i['message'] for i in issues))
+
+
 def validate_change_map(plan, locator):
     mapping = plan.get('change_map')
     if not isinstance(mapping, list) or not 1 <= len(mapping) <= 60:
-        raise ValueError('增量计划须提供 change_map：每个文件的 path、operation(modify/create/delete)、reason、requirement_ids；先定位具体改动位置')
+        raise ChangeMapError([{'code': 'missing_map', 'message': '增量计划须提供 change_map：每个文件的 path、operation(modify/create/delete)、reason、requirement_ids；先定位具体改动位置'}])
     required = {r['id'] for r in plan['requirements']}
-    covered, seen, verified = set(), set(), []
+    covered, seen, verified, issues = set(), set(), [], []
+
+    def report(code, message, **facts):
+        issues.append({'code': code, 'message': message, **facts})
+
     for change in mapping:
         if not isinstance(change, dict):
-            raise ValueError('change_map 每项须为对象')
+            report('shape', 'change_map 每项须为对象')
+            continue
         path = change.get('path')
         if (not isinstance(path, str) or path in seen or path.startswith('/')
                 or '..' in PurePosixPath(path).parts or path != str(PurePosixPath(path))):
-            raise ValueError('改动路径必须为不重复的项目内具体文件')
+            report('path', '改动路径必须为不重复的项目内具体文件')
+            continue
         from agent import safe_file
-        target = safe_file(locator.root, path)
+        try:
+            target = safe_file(locator.root, path)
+        except ValueError as exc:
+            report('path', str(exc), path=path)
+            continue
         if target.is_dir() or not PurePosixPath(path).name or path.endswith('/'):
-            raise ValueError('change_map 必须定位具体文件，不能使用目录')
+            report('path', 'change_map 必须定位具体文件，不能使用目录', path=path)
+            continue
         seen.add(path)
         entry = locator.entries.get(path)
         operation = change.get('operation')
         if operation not in ('modify', 'create', 'delete') or not isinstance(change.get('reason'), str) or not change['reason'].strip():
-            raise ValueError(f'{path} 须说明操作和与新需求的关系')
+            report('operation', f'{path} 须说明操作和与新需求的关系', path=path)
         if operation in ('modify', 'delete') and not entry:
-            raise ValueError(f'{path} 不存在，不能声称修改；先 glob_files/search_code 获取真实路径')
+            # Report every conflict in one pass. Similar paths are candidates,
+            # never an automatic rename or permission to create business code.
+            candidates = [n for n in sorted(locator.entries) if PurePosixPath(n).name == PurePosixPath(path).name][:6]
+            parent = str(PurePosixPath(path).parent)
+            report('missing_source', f'{path} 不存在，不能声称修改；先 glob_files/search_code 获取真实路径',
+                   path=path, exists=False, operation=operation, candidates=candidates,
+                   parent_exists=(locator.root / parent).is_dir(),
+                   next_action='定位现有实现；若这是新增模块，由模型明确选择 create 并补齐入口、依赖和服务，不沿用不存在的接口')
         if operation == 'create' and target.exists():
-            raise ValueError(f'{path} 已存在，应修改现有实现而非重新创建')
+            report('existing_target', f'{path} 已存在，应修改现有实现而非重新创建', path=path, exists=True, operation=operation)
         references = change.get('requirement_ids')
         if not isinstance(references, list) or not references or not all(isinstance(r, str) for r in references) or not set(references) <= required:
-            raise ValueError(f'{path} 必须关联当前 requirements')
-        covered.update(references)
+            report('requirements', f'{path} 必须关联当前 requirements', path=path)
+        else:
+            covered.update(references)
         verified.append({**change, 'source_sha': entry['sha'] if entry else None,
                          'imports': locator.dependencies.get(path, [])[:20], 'imported_by': locator.importers.get(path, [])[:20]})
     if covered != required:
-        raise ValueError('新需求没有定位到具体修改文件：' + ', '.join(sorted(required - covered)))
+        report('coverage', '新需求没有定位到具体修改文件：' + ', '.join(sorted(required - covered)))
     for task in plan.get('tasks', []):
         planned = task.get('files', [])
         if not isinstance(planned, list) or not all(isinstance(path, str) for path in planned):
-            raise ValueError('任务 files 必须为具体文件路径列表')
+            report('task_files', '任务 files 必须为具体文件路径列表')
+            continue
         missing = set(planned) - seen
         if missing:
-            raise ValueError(f"{task['id']} 的文件没有对应 change_map：" + ', '.join(sorted(missing)))
+            report('task_mapping', f"{task['id']} 的文件没有对应 change_map：" + ', '.join(sorted(missing)), task_id=task['id'], paths=sorted(missing))
+    if issues:
+        raise ChangeMapError(issues)
     plan['change_map'] = verified
     return plan

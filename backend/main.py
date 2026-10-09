@@ -27,6 +27,7 @@ from psycopg.rows import dict_row
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from tool_limits import SHELL_COMMAND_MAX
 from model_catalog import DEFAULT_MODEL, live_catalog, catalog_ids, canonical_model_id
 from attachments import AttachmentInput, store_attachments, validate_attachments
 from auth import current_user, init_auth_db, router as auth_router
@@ -487,11 +488,11 @@ class FileMove(BaseModel):
 
 
 class CommandCreate(BaseModel):
-    command: str = Field(min_length=1, max_length=2000)
+    command: str = Field(min_length=1, max_length=SHELL_COMMAND_MAX)
 
 
 class RuntimeRequest(BaseModel):
-    command: str | None = Field(default=None, max_length=2000)
+    command: str | None = Field(default=None, max_length=SHELL_COMMAND_MAX)
     restart: bool = False
 
 

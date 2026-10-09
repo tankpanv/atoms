@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent import run_agent, run_shell
+from tool_limits import SHELL_COMMAND_MAX, SHELL_TIMEOUT_DEFAULT, SHELL_TIMEOUT_MAX
 from coding_runtime import AgentState, AgentStateMachine
 
 
@@ -26,6 +27,26 @@ def calls(*items):
 
 
 class AgentExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_long_shell_command_executes_once_and_rejects_overflow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / uuid.uuid4().hex
+            root.mkdir()
+            prefix = "printf 'once\\n' >> executions.txt\n# "
+            command = prefix + 'x' * (SHELL_COMMAND_MAX - len(prefix))
+            with patch('agent.ensure_workspace', return_value=root), patch('agent.project_uid', return_value=os.getuid()):
+                code, output = await run_shell(uuid.UUID(hex=root.name), command)
+                self.assertEqual(code, 0, output)
+                with self.assertRaises(ValueError):
+                    await run_shell(uuid.UUID(hex=root.name), command + 'x')
+            self.assertEqual((root / 'executions.txt').read_text(), 'once\n')
+
+    async def test_shell_timeout_uses_extended_default_and_cap(self):
+        with patch('agent.run_command', return_value=(0, '')) as execute:
+            for requested, effective in [(None, SHELL_TIMEOUT_DEFAULT), (600, 600), (SHELL_TIMEOUT_MAX + 1, SHELL_TIMEOUT_MAX)]:
+                options = {} if requested is None else {'timeout': requested}
+                await run_shell(uuid.uuid4(), 'true', **options)
+                self.assertEqual(execute.call_args.args[-1], effective)
+
     async def test_pipefail_preserves_failed_command_exit_status(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / uuid.uuid4().hex

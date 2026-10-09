@@ -9,6 +9,7 @@ import json
 import re
 import shlex
 from pathlib import Path
+from tool_limits import SHELL_COMMAND_MAX
 
 POLICY = 'execution-contract-v1'
 
@@ -18,8 +19,8 @@ def validate_command(command, *, empty=False):
         raise ValueError('命令必须为实际可执行的非空 shell 字符串，不是操作说明')
     if not command.strip():
         return command
-    if len(command) > 12000 or '\x00' in command:
-        raise ValueError('命令长度超过 12000 字符或含 NUL')
+    if len(command) > SHELL_COMMAND_MAX or '\x00' in command:
+        raise ValueError(f'命令长度超过 {SHELL_COMMAND_MAX} 字符或含 NUL')
     try:
         tokens = shlex.split(command, comments=True)
     except ValueError as exc:

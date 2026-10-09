@@ -12,7 +12,8 @@ POLICY_VERSION = 'build-tiers-v1'
 BUDGET_MULTIPLIERS = {'normal': 1, 'deep': 2, 'advanced': 3}
 BUDGET_ENV_KEYS = ('AGENT_MAX_TOKENS', 'AGENT_MAX_ITERATIONS',
                    'AGENT_BUILD_NORMAL_MULTIPLIER', 'AGENT_BUILD_DEEP_MULTIPLIER',
-                   'AGENT_BUILD_ADVANCED_MULTIPLIER')
+                   'AGENT_BUILD_ADVANCED_MULTIPLIER', 'AGENT_PLANNING_MAX_CALLS',
+                   'AGENT_PLANNING_MAX_TOKENS', 'AGENT_PLANNING_TIMEOUT_SECONDS')
 
 
 def normalize_tier(value=None) -> BuildTier:

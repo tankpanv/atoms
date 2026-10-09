@@ -138,8 +138,7 @@ class IncrementalPlanningTests(unittest.IsolatedAsyncioTestCase):
                     calls(('search_code', {'query': 'print(greet())', 'include': '*.py'})),
                     calls(('replace_in_file', {'path': 'greet.py', 'old': 'print(greet())', 'new': 'print(greet())\nprint("goodbye")'})),
                     calls(('run_shell', {'command': 'python -c \'import subprocess; out=subprocess.check_output(["python", "greet.py"],text=True); assert out=="hello\\ngoodbye\\n"; print(out)\'', 'requirement_ids': ['R1']})),
-                    calls(('update_task', {'id': 'T1', 'status': 'done', 'evidence_ids': ['V1']})),
-                    {'content': 'Added goodbye and verified both new and existing CLI behavior.'}]
+                    calls(('update_task', {'id': 'T1', 'status': 'done', 'evidence_ids': ['V1']}))]
         seen_execution = []
         class Gateway:
             def __init__(self, *args): pass
@@ -152,7 +151,7 @@ class IncrementalPlanningTests(unittest.IsolatedAsyncioTestCase):
             plan = await make_plan(project, 'Add goodbye while preserving hello', 'model')
             result = await run_agent(project, 'Add goodbye while preserving hello', 'model', lambda *args, **kwargs: None, plan=plan)
         self.assertFalse(sequence)
-        self.assertIn('goodbye', result['summary'])
+        self.assertIn('验证通过', result['summary'])
         self.assertIn('已定位的需求改动', encoded(seen_execution[0]))
         self.assertIn('return \\"hello\\"', encoded(seen_execution[0]))
         self.assertEqual((self.root / 'greet.py').read_text().count('def greet'), 1)
@@ -190,5 +189,6 @@ class IncrementalPlanningTests(unittest.IsolatedAsyncioTestCase):
             await make_plan(uuid.uuid4(), 'Add feature', 'model')
         self.assertEqual(len(observed), 2)
         self.assertEqual(observed[1]['tools'], [])
-        self.assertEqual(observed[1]['max_tokens'], 16000)
+        from coding_runtime import model_output_limit, AgentState
+        self.assertEqual(observed[1]['max_tokens'], model_output_limit('model', AgentState.PLAN))
         self.assertEqual(observed[1]['reasoning'], {'effort': 'low'})

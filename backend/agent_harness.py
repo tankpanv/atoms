@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import re
 import time
 from pathlib import Path
 from execution_contract import validate_command, validate_directory, conformance_issues
-from build_tools import browser_enabled
+from build_tools import browser_enabled, api_acceptance_required
 
 
 PLAN_INSTRUCTIONS = """你是负责理解真实用户目标并交付完整成果的任务规划师。先理解全部对话、现有代码及附件，再制定计划。
@@ -230,9 +231,13 @@ class TaskLedger:
                 saved = {}
             if not isinstance(saved, dict):
                 saved = {}
-            same_plan = isinstance(saved.get('plan'), dict) and (
-                {k:v for k,v in saved['plan'].items() if k != 'enabled_tools'} ==
-                {k:v for k,v in plan.items() if k != 'enabled_tools'})
+            try:
+                previous_plan = validate_plan(copy.deepcopy(saved['plan']))
+            except (KeyError, TypeError, ValueError):
+                previous_plan = None
+            same_plan = isinstance(previous_plan, dict) and (
+                {k:v for k,v in previous_plan.items() if k != 'enabled_tools'} ==
+                {k:v for k,v in self.plan.items() if k != 'enabled_tools'})
             if saved.get('request') == request and same_plan and not saved.get('completed'):
                 by_id = {item['id']: item for item in saved.get('tasks', []) if isinstance(item, dict) and 'id' in item}
                 for task in self.tasks:
@@ -294,14 +299,47 @@ class TaskLedger:
             from system_contract import success_receipt
             from agent import snapshot_files
             current = source_digest(snapshot_files(self.root))
-            relevant = [e for e in self.evidence if e['id'] in evidence_ids and e['source_digest'] == current and success_receipt(e)]
-            if not all(any(rid in e['requirement_ids'] for e in relevant) for rid in task['requirement_ids']):
+            # A prerequisite stage is not the final owner of a shared requirement.
+            descendants = {task_id}
+            for later in self.tasks:
+                if set(later.get('depends_on', [])) & descendants:
+                    descendants.add(later['id'])
+            downstream = {rid for later in self.tasks if later['id'] in descendants - {task_id}
+                          for rid in later['requirement_ids']}
+            relevant = [e for e in self.evidence if e['id'] in evidence_ids and e['source_digest'] == current
+                        and not e.get('historical') and self.acceptance_evidence(e)]
+            if not all(any(rid in e['requirement_ids'] and (success_receipt(e) or
+                           (rid in downstream and e['kind'] in ('run_build', 'runtime_check')))
+                           for e in relevant) for rid in task['requirement_ids']):
                 raise ValueError('系统任务完成必须关联当前源码的真实成功链路；构建、健康和预期错误路径不能替代')
         task.update(status=status, note=note[:2000], evidence_ids=evidence_ids)
         self.persist()
         return json.dumps({'updated_task': task, 'remaining': sum(t['status'] != 'done' for t in self.tasks),
                            'remaining_active': sum(t['status'] not in ('done', 'deferred') for t in self.tasks),
                            'deferred': sum(t['status'] == 'deferred' for t in self.tasks)}, ensure_ascii=False)
+
+    def revise_tasks(self, tasks, reason):
+        """Let the acting model adapt execution, preserving the product contract."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError('调整任务必须说明实际阻塞、原路径为何无效及新策略')
+        proposed = copy.deepcopy(self.plan)
+        proposed['tasks'] = tasks
+        proposed = validate_plan(proposed)
+        old = {task['id']: task for task in self.tasks}
+        revised = []
+        for definition in proposed['tasks']:
+            previous = old.get(definition['id'], {})
+            same = all(previous.get(key) == definition.get(key) for key in definition)
+            revised.append({**definition, 'status': previous.get('status', 'pending') if same else 'pending',
+                            'note': previous.get('note', '') if same else '',
+                            'evidence_ids': previous.get('evidence_ids', []) if same else []})
+        # Validate everything before mutating the live ledger; retain real evidence.
+        self.plan = proposed
+        self.tasks = revised
+        self.persist()
+        (self.directory / 'PLAN.md').write_text(self.render_plan())
+        return json.dumps({'reason': reason, 'tasks': revised,
+                           'policy': '原始需求、接口与最终验收保持有效；任务重组不代表任何需求通过'}, ensure_ascii=False)
 
     def model_context(self, files: dict | None = None) -> str:
         """Small execution view; full requirements and original plan stay durable."""
@@ -361,12 +399,14 @@ class TaskLedger:
                 for item in self.evidence):
             issues.append("新前端缺少真实框架 CLI 或可信平台模板初始化记录；请使用平台模板、scaffold_project 或官方 CLI")
         build_tier = self.plan.get('build_tier', 'normal')
+        normal_web = build_tier == 'normal' and self.plan.get('application_type') == 'web'
+        require_api = api_acceptance_required(self.plan)
         for requirement in self.plan["requirements"]:
             # Normal web builds are demo-first. API contracts are still kept in
             # the plan and implemented in source, but an unavailable provider or
             # an unneeded per-endpoint probe must not block the visual preview.
-            if (build_tier == 'normal' and self.plan.get('application_type') == 'web'
-                    and requirement.get('verification') == 'api'):
+            if (normal_web and requirement.get('verification') == 'api'
+                    and requirement.get('origin', 'explicit') != 'explicit'):
                 continue
             expected_kind = {"browser": "browser_check", "api": "http_request", "command": "run_shell", "artifact": "artifact_check"}[requirement["verification"]]
             if expected_kind == 'browser_check' and not browser_enabled(self.plan):
@@ -375,8 +415,10 @@ class TaskLedger:
             if not any(requirement["id"] in item["requirement_ids"] and item["kind"] in kinds for item in current):
                 method = 'command（浏览器验收未启用）' if requirement['verification'] == 'browser' and not browser_enabled(self.plan) else requirement['verification']
                 issues.append(f"{requirement['id']} 缺少当前源码的 {method} 验收证据，验证工具需传 requirement_ids")
-        contract_issues = contract_acceptance_issues(self.plan, self.evidence, digest)
-        if not (build_tier == 'normal' and self.plan.get('application_type') == 'web'):
+        explicit = {r['id'] for r in self.plan['requirements'] if r.get('origin', 'explicit') == 'explicit'}
+        contract_issues = contract_acceptance_issues(self.plan, self.evidence, digest,
+                            requirement_ids=explicit if normal_web else None)
+        if not normal_web or require_api:
             issues.extend(contract_issues)
         architecture = self.plan["architecture"]
         issues.extend(conformance_issues(self.root, self.plan, files))
@@ -390,7 +432,7 @@ class TaskLedger:
             backend_prefix = (backend.get("directory") or "backend").strip("/") + "/"
             if not any(name.startswith(backend_prefix) and name.endswith((".py", ".ts", ".js", ".go", ".rs")) for name in files):
                 issues.append("架构需要真实后端，但后端实现文件缺失")
-            if not (build_tier == 'normal' and self.plan.get('application_type') == 'web') and not any(item["kind"] == "http_request" for item in current):
+            if (not normal_web or require_api) and not any(item["kind"] == "http_request" for item in current):
                 issues.append("后端没有当前源码的真实 HTTP 验证证据")
         if self.plan["application_type"] != "artifact" and not (self.root / "README.md").exists():
             issues.append("缺少 README：应说明安装、启动、架构、数据持久化、测试和部署限制")

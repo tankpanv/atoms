@@ -3,10 +3,10 @@ import { Check, ChevronDown } from 'lucide-react'
 import './build-tiers.css'
 
 export type BuildTier = 'normal' | 'deep' | 'advanced'
-export const buildTiers: { id: BuildTier; label: string; description: string }[] = [
+export const buildTiers: { id: BuildTier; label: string; hint?: string; description: string }[] = [
   { id: 'normal', label: '普通', description: '准确、完整实现你的要求，聚焦核心功能。' },
-  { id: 'deep', label: '深度', description: '深入分析需求，补充容易遗漏的细节，系统优化设计和体验。' },
-  { id: 'advanced', label: '高级', description: '全面规划完整链路与必要扩展，完善架构、体验，并深入验证关键风险。' },
+  { id: 'deep', label: '深度', hint: '额度较高，耗时比较长', description: '深入分析需求，补充容易遗漏的细节，系统优化设计和体验。' },
+  { id: 'advanced', label: '高级', hint: '额度高，耗时长', description: '全面规划完整链路与必要扩展，完善架构、体验，并深入验证关键风险。' },
 ]
 
 export function savedBuildTier(): BuildTier {
@@ -76,7 +76,10 @@ export default function BuildTierSelector({ value, onChange, disabled = false }:
       <div className="build-tier-heading">构建档位</div>
       {buildTiers.map(tier => <button type="button" key={tier.id} role="menuitemradio"
         aria-checked={value === tier.id} onClick={() => { onChange(tier.id); setOpen(false); trigger.current?.focus() }}>
-        <span><strong>{tier.label}</strong><small>{tier.description}</small></span>
+        <span>
+          <span className="build-tier-label"><strong>{tier.label}</strong>{tier.hint && <span className="build-tier-hint">{tier.hint}</span>}</span>
+          <small>{tier.description}</small>
+        </span>
         {value === tier.id && <Check size={16} />}
       </button>)}
     </div>}

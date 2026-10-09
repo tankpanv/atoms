@@ -2,6 +2,7 @@ import json
 import unittest
 from agent import TOOLS
 from tool_contract import parse_tool_arguments,ToolArgumentError
+from tool_limits import SHELL_COMMAND_MAX, SHELL_TIMEOUT_DEFAULT, SHELL_TIMEOUT_MAX
 
 class ToolSpecsTests(unittest.TestCase):
     def parse(self,name,args):
@@ -24,12 +25,21 @@ class ToolSpecsTests(unittest.TestCase):
             check(schema)
 
     def test_strings_bytes_and_empty_content(self):
-        for name,args in [('run_shell',{'command':' '*3}),('run_shell',{'command':'x'*2001}),('write_file',{'path':'x','content':'text\x00'}),('replace_in_file',{'path':'x','old':'','new':''}),('search_code',{'query':' '}),('read_file',{'path':'x\x00'})]:
+        for name,args in [('run_shell',{'command':' '*3}),('run_shell',{'command':'x'*(SHELL_COMMAND_MAX+1)}),('run_shell',{'command':'echo x\x00'}),('write_file',{'path':'x','content':'text\x00'}),('replace_in_file',{'path':'x','old':'','new':''}),('search_code',{'query':' '}),('read_file',{'path':'x\x00'})]:
             with self.assertRaises(ToolArgumentError):self.parse(name,args)
         self.assertEqual(self.parse('write_file',{'path':'empty.txt','content':''})['content'],'')
         content = '中' * 100000
         self.assertEqual(self.parse('write_file',{'path':'x','content':content})['content'], content)
         self.parse('replace_in_file',{'path':'x','old':content,'new':content + 'changed'})
+
+    def test_long_commands_and_extended_timeouts_use_the_public_limits(self):
+        command = 'true #' + 'x' * (SHELL_COMMAND_MAX - 6)
+        self.assertEqual(self.parse('run_shell', {'command': command, 'timeout': 600}), {'command': command, 'timeout': 600})
+        schema = next(tool['function']['parameters']['properties'] for tool in TOOLS if tool['function']['name'] == 'run_shell')
+        self.assertEqual(schema['command']['maxLength'], SHELL_COMMAND_MAX)
+        self.assertIn(str(SHELL_COMMAND_MAX), schema['command']['description'])
+        self.assertEqual(schema['timeout']['default'], SHELL_TIMEOUT_DEFAULT)
+        self.assertEqual(schema['timeout']['maximum'], SHELL_TIMEOUT_MAX)
 
     def test_wrong_types_ranges_and_action_specific_keys(self):
         for name,args in [('read_file',{'path':'x','offset':-1}),('read_file',{'path':'x','limit':True}),('read_code',{'path':'x','start_line':0}),('http_request',{'path':'/','expect_status':600}),('http_request',{'path':'https://example.test','expect_status':200}),('browser_check',{'actions':[]}),('browser_check',{'actions':[{'action':'reload','value':'ignored'}]}),('read_document',{'id':'filename.txt'}),('run_build',{'requirement_ids':['R1','R1']})]:

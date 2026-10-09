@@ -160,3 +160,26 @@ class IncidentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.await_count, 2)
             state = json.loads((root / '.atoms/task-state.json').read_text())
             self.assertEqual(len([e for e in state['evidence'] if e['kind'] == 'http_request']), 2)
+
+    def test_normal_explicit_api_contract_rejects_build_health_and_old_success(self):
+        from agent_harness import TaskLedger, source_digest
+        from test_system_contract import system_plan, receipt
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = default_plan(True)
+            plan['system_contract'] = system_plan()['system_contract']
+            plan.update(build_tier='normal', enabled_tools=[])
+            plan['requirements'][0].update(verification='api', origin='explicit')
+            ledger = TaskLedger(root, plan, '实现明确要求的服务功能')
+            files = {'README.md': 'Existing project', 'frontend/src/domain.ts': 'business', 'backend/generate.py': 'backend'}
+            current = source_digest(files)
+            evidence = receipt(source=current)
+            evidence['kind'] = 'run_build'
+            ledger.evidence = [evidence]
+            self.assertTrue(any('真实成功接口证据' in issue for issue in ledger.completion_issues(files)))
+            ledger.evidence = [receipt(source=current, body={'status': 'healthy'})]
+            self.assertTrue(any('真实成功接口证据' in issue for issue in ledger.completion_issues(files)))
+            ledger.evidence = [receipt(source='previous-source')]
+            self.assertTrue(any('真实成功接口证据' in issue for issue in ledger.completion_issues(files)))
+            ledger.evidence = [receipt(source=current)]
+            self.assertFalse(any('真实成功接口证据' in issue for issue in ledger.completion_issues(files)))

@@ -6,17 +6,44 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from agent import TOOLS, run_agent, write_files, read_file, write_file
+from agent import TOOLS, run_agent, write_files, read_files, read_file, write_file
+from agent_session import AgentSession
 from coding_runtime import AgentState, apply_unified_patch
 from tool_contract import ToolArgumentError, parse_tool_arguments
-from tool_limits import SHELL_TIMEOUT_MAX, READ_LIMIT_MAX, WRITE_BATCH_MAX
+from tool_limits import SHELL_TIMEOUT_MAX, READ_LIMIT_MAX, READ_BATCH_CHARS_MAX, WRITE_BATCH_MAX
 from test_agent_execution import calls, cli_plan
 
 
 class ContractTests(unittest.TestCase):
+    def test_batch_read_above_old_budget_reaches_model_without_shortening(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            items = []
+            expected = []
+            for index in range(7):
+                path = f'file{index}.txt'
+                content = str(index) + 'x' * 11999
+                (root / path).write_text(content)
+                items.append({'path': path, 'limit': 12000})
+                expected.append(content)
+            call = calls(('read_files', {'files': items}))['tool_calls'][0]
+            adjustments = []
+            parsed = parse_tool_arguments(call, TOOLS, adjustments=adjustments)
+            self.assertEqual(parsed['files'], items)
+            self.assertEqual(adjustments, [])
+            result = read_files(root, parsed['files'])
+            self.assertGreater(len(result), 84000)
+            self.assertLess(len(result), READ_BATCH_CHARS_MAX)
+            for content in expected:
+                self.assertIn(content, result)
+            session = AgentSession(root)
+            model_output = session.output(call, result)
+            self.assertIn(result, model_output)
+            self.assertNotIn('中间省略', model_output)
+
     def test_execution_hints_are_capped_without_mutating_model_request(self):
         for name, args, field, effective in [
-            ('run_shell', {'command': 'test', 'timeout': 300}, 'timeout', SHELL_TIMEOUT_MAX),
+            ('run_shell', {'command': 'test', 'timeout': SHELL_TIMEOUT_MAX + 300}, 'timeout', SHELL_TIMEOUT_MAX),
             ('read_file', {'path': 'x', 'limit': 45000}, 'limit', READ_LIMIT_MAX),
             ('read_document', {'id': '00000000-0000-0000-0000-000000000001', 'limit': 20000}, 'limit', READ_LIMIT_MAX),
             ('read_tool_output', {'output_id': 'x', 'limit': 16000}, 'limit', READ_LIMIT_MAX)]:
@@ -147,7 +174,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 {'path': 'README.md', 'content': 'Run python greet.py; local CLI.'},
                 {'path': 'other.txt', 'content': 'valid third file'}, {'path': 'extra.txt', 'content': 'valid fourth file'}]})),
                 calls(('read_file', {'path': 'long.txt', 'limit': 20000})),
-                calls(('run_shell', {'command': 'python greet.py', 'timeout': 300, 'requirement_ids': ['R1']})),
+                calls(('run_shell', {'command': 'python greet.py', 'timeout': SHELL_TIMEOUT_MAX + 300, 'requirement_ids': ['R1']})),
                 calls(('update_task', {'id': 'T1', 'status': 'done', 'evidence_ids': ['V1']})), {'content': 'verified'}]
             observed = []
             class Gateway:
@@ -163,7 +190,7 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 shell.assert_any_call(uuid.UUID(hex=root.name), 'python greet.py', SHELL_TIMEOUT_MAX)
             outputs = [x[2].get('tool_output', '') for x in observed if x[0] == 'tool']
             self.assertTrue(any('long.txt [0:12000/16000]' in x for x in outputs))
-            self.assertTrue(any('"requested": 300, "effective": 180' in x for x in outputs))
+            self.assertTrue(any(f'"requested": {SHELL_TIMEOUT_MAX + 300}, "effective": {SHELL_TIMEOUT_MAX}' in x for x in outputs))
             self.assertFalse(any('工具参数需修正' in x[1] for x in observed))
             self.assertTrue((root / 'extra.txt').exists())
 
@@ -213,7 +240,9 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                     return sequence.pop(0)
             with patch('agent.ensure_workspace',return_value=root), patch('agent.project_uid',return_value=os.getuid()), patch('agent.ModelGateway',Gateway):
                 await run_agent(uuid.UUID(hex=root.name),'Create greeting CLI','model',lambda kind,label,*a,**kw:observed.append(label),plan=json.dumps(cli_plan()))
-            self.assertFalse(sequence)
+            # Verified completion need not spend another model call on prose.
+            self.assertLessEqual(len(sequence), 1)
+            self.assertTrue(json.loads((root / '.atoms/task-state.json').read_text())['completed'])
             self.assertTrue((root/'greet.py').exists())
             self.assertIn('继续实现与交付',observed)
 

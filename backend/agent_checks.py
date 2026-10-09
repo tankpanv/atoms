@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 from contextlib import ExitStack
 import os
 import tempfile
@@ -74,11 +75,69 @@ def contains_json(actual, expected) -> bool:
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(key in actual and contains_json(actual[key], value) for key, value in expected.items())
     if isinstance(expected, list):
-        return isinstance(actual, list) and all(any(contains_json(item, value) for item in actual) for value in expected)
+        # An empty expected list asserts absence, not a vacuous subset match.
+        return isinstance(actual, list) and (not actual if not expected else
+            all(any(contains_json(item, value) for item in actual) for value in expected))
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        return type(actual) is type(expected) and actual == expected
     return actual == expected
 
 
+def response_value(session, name, pointer):
+    if not isinstance(pointer, str) or (pointer and not pointer.startswith('/')):
+        raise ValueError('响应字段使用 JSON Pointer，例如 /access_token 或 /user/id')
+    value = session.http_response(name)
+    try:
+        for part in pointer.split('/')[1:] if pointer else []:
+            key = part.replace('~1', '/').replace('~0', '~')
+            value = value[int(key)] if isinstance(value, list) and key.isdecimal() else value[key]
+        return value
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f'HTTP 响应 {name} 中不存在字段 {pointer}') from exc
+
+
+def resolve_http_args(project_id, args):
+    """Copy opaque values in the executor, never through model transcription."""
+    if not (args.get('save_as') or args.get('auth_from') or '{{http:' in json.dumps(args)):
+        return args, None
+    from agent import ensure_workspace
+    from agent_session import AgentSession
+    session = AgentSession(ensure_workspace(project_id))
+    pattern = re.compile(r'\{\{http:([A-Za-z][A-Za-z0-9_-]{0,63}):([^{}]*)\}\}')
+    def resolve(value):
+        if isinstance(value, dict):
+            return {key: resolve(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [resolve(item) for item in value]
+        if not isinstance(value, str):
+            return value
+        match = pattern.fullmatch(value)
+        if match:
+            return response_value(session, *match.groups())
+        def substitute(match):
+            item = response_value(session, *match.groups())
+            if not isinstance(item, (str, int, float)) or isinstance(item, bool):
+                raise ValueError('字符串内的 HTTP 响应引用必须指向字符串或数字')
+            return str(item)
+        return pattern.sub(substitute, value)
+    resolved = resolve(args)
+    if args.get('auth_from'):
+        auth = args['auth_from']
+        token = response_value(session, auth['response'], auth.get('pointer', '/access_token'))
+        if not isinstance(token, str) or not token or '\r' in token or '\n' in token:
+            raise ValueError('认证响应字段必须为非空单行字符串')
+        if any(key.lower() == 'authorization' for key in resolved.get('headers', {})):
+            raise ValueError('auth_from 与 Authorization header 不得同时提供，避免账号身份混淆')
+        resolved['headers'] = {**resolved.get('headers', {}), 'Authorization': 'Bearer ' + token}
+    return resolved, session
+
+
 async def http_request(project_id: uuid.UUID, args: dict):
+    args, bindings = resolve_http_args(project_id, args)
+    if args.get('save_as'):
+        # Validate the name before executing a potentially mutating request.
+        if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', args['save_as']):
+            raise ValueError('save_as 必须为合法的 HTTP 响应名称')
     runtime = await start_runtime(project_id, args.get('configured_command', ''))
     if runtime is None:
         raise ValueError("项目未配置可运行服务")
@@ -129,29 +188,49 @@ async def http_request(project_id: uuid.UUID, args: dict):
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
             response = await client.request(method, f"http://127.0.0.1:{port}{path}", headers=headers, **payload)
     passed = response.status_code == expected
+    assertion_errors = []
+    if not passed:
+        assertion_errors.append(f'HTTP 状态不匹配：期望 {expected}，实际 {response.status_code}')
     if "expect_json" in args:
         try:
-            passed = passed and contains_json(response.json(), args["expect_json"])
+            if not contains_json(response.json(), args["expect_json"]):
+                passed = False
+                assertion_errors.append('JSON 内容与 expect_json 不匹配；空数组要求实际数组为空')
         except ValueError:
             passed = False
-    assertion_errors = []
+            assertion_errors.append('响应不是有效 JSON')
+    if 'expect_body' in args and response.text != args['expect_body']:
+        passed = False
+        assertion_errors.append('响应正文与 expect_body 不匹配')
     if 'expect_schema' in args:
         from runtime_assertions import shape_issues
         try:
-            assertion_errors = shape_issues(response.json(), args['expect_schema'])
-            passed = passed and not assertion_errors
+            schema_errors = shape_issues(response.json(), args['expect_schema'])
+            assertion_errors.extend(schema_errors)
+            passed = passed and not schema_errors
         except ValueError as error:
             passed = False
-            assertion_errors = [str(error)]
+            assertion_errors.append(str(error))
     try:
         data = response.json()
         simulated = isinstance(data, dict) and data.get('simulated') is True
+        if bindings and args.get('save_as') and passed:
+            bindings.http_response(args['save_as'], data)
     except ValueError:
         simulated = False
+        if bindings and args.get('save_as') and passed:
+            passed = False
+            assertion_errors.append('save_as 要求有效 JSON 响应，未保存响应绑定')
     output = json.dumps({"method": method, "path": path, "status": response.status_code, "simulated": simulated,
+                         "assertion_version": 2,
                          "expected_status": expected, "passed": passed, "body": response.text[:8000],
                          "validated_json": args.get('expect_json') if passed else None,
                          "validated_schema": args.get('expect_schema') if passed else None,
+                         "validated_body": args.get('expect_body') if passed else None,
+                         "saved_as": args.get('save_as') if passed else None,
+                         "auth_response": (args.get('auth_from') or {}).get('response'),
+                         "next_action": ('重新登录并 save_as，然后用 auth_from 引用完整响应；先判别凭据/实验输入，不据此直接修改业务鉴权。'
+                                         if response.status_code == 401 and expected != 401 else None),
                          "assertion_errors": assertion_errors}, ensure_ascii=False)
     return 0 if passed else 1, output
 

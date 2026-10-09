@@ -17,7 +17,21 @@ def requested_stack(prompt, history=None):
     text = '\n'.join([str(item.get('content', '')) for item in (history or []) if item.get('role') == 'user'] + [prompt])
     return bool(STACK_WORDS.search(text))
 
-def planner_contract(prompt, history=None):
+def planner_contract(prompt, history=None, existing_files=None):
+    if existing_files is not None and any(not name.startswith('.atoms/') for name in existing_files):
+        # A starter's available capabilities are not facts about an existing
+        # app. In particular web-v1 does not contain the api-v1 backend.
+        paths = set(existing_files)
+        expected = ('backend/app/main.py', 'backend/app/routes.py', 'backend/app/db.py',
+                    'backend/requirements.txt', 'frontend/src/lib/api.ts')
+        facts = {path: path in paths for path in expected}
+        return ('这是已有项目增量开发，平台默认模板只用于全新项目，不会为这次改动重新安装或自动补齐全栈模板。'
+                '以当前源码、实际命令和用户明确技术要求为准；保留已实现业务及数据。平台提供 PostgreSQL 连接器、依赖安装和服务托管能力，不代表业务数据库模块、路由、API 客户端或后端启动配置已经存在。'
+                '模板常见路径的实际存在性：' + json.dumps(facts, ensure_ascii=False) + '。false 表示当前没有该文件，不表示应直接创建此路径；先判断实际架构与已有替代实现。'
+                '需要增加持久化/认证等后端时，先定位现有存储与调用方；根据事实由模型选择复用或新增模块。新增模块明确 create，完整规划服务入口、依赖声明、运行命令、同源代理、前端消费者和必要的数据迁移，不引用不存在的 connection()/initialize()。'
+                '数据库凭据仅用于服务端，项目数据库连接由 APP_DATABASE_URL/APP_DATABASE_SCHEMA 注入，不读取平台管理员凭据。'
+                '增量 commands 可以整体沿用原计划；需要新增服务时输出真实 services 配置。commands.bootstrap/test 无操作可省略为空列表，build/dev 必须是实际命令。'
+                '按端到端业务流程安排少量任务；用真实启动、成功操作、失败状态及持久化回读验收，保留旧功能回归。不要把新项目的预览分阶段要求强加给已可预览的项目。')
     if requested_stack(prompt, history):
         return '用户提到了技术栈或数据库：优先准确遵循明确要求和版本，已有项目保持原栈；不要自动使用默认模板。其他未指定部分按需求决策。'
     return ('未指定技术栈的新 web 项目使用平台默认模板，不再执行 CLI 初始化：前端 Vite React TypeScript + shadcn/ui + Tailwind CSS，目录 frontend；'
