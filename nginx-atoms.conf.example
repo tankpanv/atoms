@@ -1,0 +1,19 @@
+# Install on the frps/Nginx server as an HTTP server block for 120.55.37.39.
+# frpc keeps the tunnel on remote port 25173; Nginx owns port 80.
+server {
+    listen 80 default_server;
+    server_name 120.55.37.39;
+
+    location / {
+        proxy_pass http://127.0.0.1:25173;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

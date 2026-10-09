@@ -1,0 +1,37 @@
+{
+  "affected_project": "33ebfaae27174fdc9016877a0056fa31",
+  "root_cause": {
+    "stage": "TEST scene generation",
+    "per_call_output_limit": 2000,
+    "attempts": 2,
+    "finish_reason": "length",
+    "reasoning_tokens_per_attempt": 2000,
+    "visible_content_chars": 0
+  },
+  "regression_passed": 83,
+  "build_gate_passed": 30,
+  "original_project_browser_operations": 11,
+  "real_model": {
+    "provider_model": "deepseek/deepseek-v4.1-flash",
+    "calls": 3,
+    "total_tokens": 19791,
+    "exit_code": 0,
+    "business_files_unchanged": true
+  },
+  "image": "sha256:dd60deebc36db00841d51d443029cd45a5a06110396a6eb0024760b757cbffab",
+  "retry_bounds": {
+    "json_attempts_per_scene": 2,
+    "browser_scene_corrections": 2,
+    "maximum_scene_model_calls": 6,
+    "existing_task_and_repair_budget_enforced": true
+  },
+  "release_regression_seconds": 42.801,
+  "health": {
+    "database": "connected",
+    "ai_enabled": true
+  },
+  "post_deploy_original_preview": {
+    "http_status": 200,
+    "real_random_answer_submission_passed": true
+  }
+}

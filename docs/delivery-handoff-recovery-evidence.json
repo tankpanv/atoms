@@ -1,0 +1,356 @@
+{
+  "project_id": "87c509ae-34db-44ac-96ae-ed60b3ed9a9c",
+  "job_id": "dac337d0-fde1-419f-9de6-afc25ec1d583",
+  "verification": "core_interactions",
+  "model_calls": 3,
+  "tokens": 28099,
+  "business_sources_unchanged": true,
+  "report": {
+    "title": "24 点游戏",
+    "text": "24 点游戏\n\n用下面四张牌（每张恰好用一次）以及 + - * / 和括号，算出 24。\n\n1\n5\n2\n10\n3\n6\n4\n12\n你的算式\n提交答案\n换题\n隐藏参考答案\n⚠️\n\n每张牌必须且只能使用一次：本题四张牌是 5、6、10、12，而你的算式中用到了 1、1。\n\n参考答案：12 + (6 / (5 / 10)) = 24\n\n这个表达式恰好用到了本题四张牌（5、10、6、12）各一次；点击「换题」后参考答案会被清空。\n\n牌面范围 1–13，每道题都保证至少有一个解。算式支持半角与全角符号（＋ － × ÷ （ ））。",
+    "controls": [
+      {
+        "tag": "input",
+        "text": "",
+        "id": "expression",
+        "testid": "expression-input",
+        "placeholder": "例如：(8-6/3)*4",
+        "type": null,
+        "disabled": false
+      },
+      {
+        "tag": "button",
+        "text": "提交答案",
+        "id": "",
+        "testid": "submit-answer",
+        "placeholder": null,
+        "type": "submit",
+        "disabled": false
+      },
+      {
+        "tag": "button",
+        "text": "换题",
+        "id": "",
+        "testid": "new-puzzle",
+        "placeholder": null,
+        "type": "button",
+        "disabled": false
+      },
+      {
+        "tag": "button",
+        "text": "隐藏参考答案",
+        "id": "",
+        "testid": "show-solution",
+        "placeholder": null,
+        "type": "button",
+        "disabled": false
+      }
+    ],
+    "observables": [
+      {
+        "tag": "div",
+        "id": "root",
+        "testid": null,
+        "role": null,
+        "text": "24 点游戏\n\n用下面四张牌（每张恰好用一次）以及 + - * / 和括号，算出 24。\n\n1\n5\n2\n10\n3\n6\n4\n12\n你的算式\n提交答案\n换题\n隐藏参考答案\n⚠️\n\n每张牌必须且只能使用一次：本题四张牌是 5、6、10、12，而你的算式中用到了 1、1。\n\n参考答案：12 + (6 / (5 / 10)) = 24\n\n这个表达式恰好用到了本题四张牌（5、10、6、12）各一次；点击「换题」后参考答案会被清空。\n\n牌面范围 1–13，每道题都保证至少有一个解。算式支持半角与全角符号（＋ － × ÷ （ ））。",
+        "children": [
+          {
+            "tag": "main",
+            "text": "24 点游戏\n\n用下面四张牌（每张恰好用一次）以及 + - * / 和括号，算出 24。\n\n1\n5\n2\n10\n3\n6\n4\n12\n你的算式\n提交答案\n换题\n隐藏参考答案\n⚠️\n\n每张牌必须且只能使用一次：本题四张牌是 5、6、10、12，而你的算式中用到了 1、1。\n\n参考答案：12 + (6 / (5 / 10)) = 24\n\n这个表达式恰好用到了本题四张牌（5、10、6、12）各一次；点击「换题"
+          }
+        ]
+      },
+      {
+        "tag": "div",
+        "id": "",
+        "testid": "card-0",
+        "role": null,
+        "text": "1\n5",
+        "children": [
+          {
+            "tag": "span",
+            "text": "1"
+          },
+          {
+            "tag": "span",
+            "text": "5"
+          }
+        ]
+      },
+      {
+        "tag": "span",
+        "id": "",
+        "testid": "card-value",
+        "role": null,
+        "text": "5",
+        "children": []
+      },
+      {
+        "tag": "div",
+        "id": "",
+        "testid": "card-1",
+        "role": null,
+        "text": "2\n10",
+        "children": [
+          {
+            "tag": "span",
+            "text": "2"
+          },
+          {
+            "tag": "span",
+            "text": "10"
+          }
+        ]
+      },
+      {
+        "tag": "span",
+        "id": "",
+        "testid": "card-value",
+        "role": null,
+        "text": "10",
+        "children": []
+      },
+      {
+        "tag": "div",
+        "id": "",
+        "testid": "card-2",
+        "role": null,
+        "text": "3\n6",
+        "children": [
+          {
+            "tag": "span",
+            "text": "3"
+          },
+          {
+            "tag": "span",
+            "text": "6"
+          }
+        ]
+      },
+      {
+        "tag": "span",
+        "id": "",
+        "testid": "card-value",
+        "role": null,
+        "text": "6",
+        "children": []
+      },
+      {
+        "tag": "div",
+        "id": "",
+        "testid": "card-3",
+        "role": null,
+        "text": "4\n12",
+        "children": [
+          {
+            "tag": "span",
+            "text": "4"
+          },
+          {
+            "tag": "span",
+            "text": "12"
+          }
+        ]
+      },
+      {
+        "tag": "span",
+        "id": "",
+        "testid": "card-value",
+        "role": null,
+        "text": "12",
+        "children": []
+      },
+      {
+        "tag": "input",
+        "id": "expression",
+        "testid": "expression-input",
+        "role": null,
+        "text": "",
+        "children": []
+      },
+      {
+        "tag": "button",
+        "id": "",
+        "testid": "submit-answer",
+        "role": null,
+        "text": "提交答案",
+        "children": []
+      },
+      {
+        "tag": "button",
+        "id": "",
+        "testid": "new-puzzle",
+        "role": null,
+        "text": "换题",
+        "children": []
+      },
+      {
+        "tag": "button",
+        "id": "",
+        "testid": "show-solution",
+        "role": null,
+        "text": "隐藏参考答案",
+        "children": []
+      },
+      {
+        "tag": "div",
+        "id": "",
+        "testid": "feedback",
+        "role": "status",
+        "text": "⚠️\n\n每张牌必须且只能使用一次：本题四张牌是 5、6、10、12，而你的算式中用到了 1、1。",
+        "children": [
+          {
+            "tag": "span",
+            "text": "⚠️"
+          },
+          {
+            "tag": "div",
+            "text": "每张牌必须且只能使用一次：本题四张牌是 5、6、10、12，而你的算式中用到了 1、1。"
+          }
+        ]
+      },
+      {
+        "tag": "p",
+        "id": "",
+        "testid": "feedback-text",
+        "role": null,
+        "text": "每张牌必须且只能使用一次：本题四张牌是 5、6、10、12，而你的算式中用到了 1、1。",
+        "children": []
+      },
+      {
+        "tag": "div",
+        "id": "",
+        "testid": "solution",
+        "role": null,
+        "text": "参考答案：12 + (6 / (5 / 10)) = 24\n\n这个表达式恰好用到了本题四张牌（5、10、6、12）各一次；点击「换题」后参考答案会被清空。",
+        "children": [
+          {
+            "tag": "p",
+            "text": "参考答案：12 + (6 / (5 / 10)) = 24"
+          },
+          {
+            "tag": "p",
+            "text": "这个表达式恰好用到了本题四张牌（5、10、6、12）各一次；点击「换题」后参考答案会被清空。"
+          }
+        ]
+      },
+      {
+        "tag": "code",
+        "id": "",
+        "testid": "solution-expression",
+        "role": null,
+        "text": "12 + (6 / (5 / 10))",
+        "children": []
+      },
+      {
+        "tag": "p",
+        "id": "",
+        "testid": "solution-note",
+        "role": null,
+        "text": "这个表达式恰好用到了本题四张牌（5、10、6、12）各一次；点击「换题」后参考答案会被清空。",
+        "children": []
+      }
+    ],
+    "rendered_elements": 4,
+    "actions_completed": [
+      {
+        "action": "click",
+        "selector": "[data-testid='new-puzzle']"
+      },
+      {
+        "action": "click",
+        "selector": "[data-testid='show-solution']"
+      },
+      {
+        "action": "fill_from_text",
+        "selector": "[data-testid='expression-input']",
+        "source_selector": "[data-testid='solution-expression']"
+      },
+      {
+        "action": "click",
+        "selector": "[data-testid='submit-answer']"
+      },
+      {
+        "action": "assert_text",
+        "selector": "[data-testid='feedback-text']",
+        "value": "正确"
+      },
+      {
+        "action": "fill",
+        "selector": "[data-testid='expression-input']",
+        "value": "1+1"
+      },
+      {
+        "action": "press",
+        "selector": "[data-testid='expression-input']",
+        "value": "Enter"
+      },
+      {
+        "action": "assert_text",
+        "selector": "[data-testid='feedback-text']",
+        "value": "每张牌必须且只能使用一次"
+      }
+    ],
+    "errors": [],
+    "failed_responses": [],
+    "screenshot": ".atoms/screenshots/27fd863bf0334e6da05d89242be85816.png"
+  },
+  "usage": [
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "generation_id": "gen-1791085251-0g5xxDjM1iyK22XzG7up",
+      "cost": 0.0050405,
+      "prompt_tokens": 2506,
+      "completion_tokens": 8192,
+      "reasoning_tokens": 8067,
+      "total_tokens": 10698,
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "duration_ms": 79015
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "generation_id": "gen-1791085330-dZ8y72PV3UfIODLKA9Jz",
+      "cost": 0.002055292,
+      "prompt_tokens": 2534,
+      "completion_tokens": 3222,
+      "reasoning_tokens": 3042,
+      "total_tokens": 5756,
+      "cached_tokens": 2304,
+      "cache_write_tokens": 0,
+      "duration_ms": 31087
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "generation_id": "gen-1791085368-vBWSE5T0z5D2gRiHtPSz",
+      "cost": 0.003312242,
+      "prompt_tokens": 6673,
+      "completion_tokens": 4972,
+      "reasoning_tokens": 4789,
+      "total_tokens": 11645,
+      "cached_tokens": 2304,
+      "cache_write_tokens": 0,
+      "duration_ms": 59559
+    }
+  ],
+  "diagnostic": "",
+  "image": "sha256:a6f3db5fa101798fd0aec55ca89e46564ecec2171dfb42876001190732248bb1",
+  "regression_tests": 64,
+  "image_build_gates": 52,
+  "product_tests": 20,
+  "playwright_mcp": {
+    "random_answer_via_enter": "passed",
+    "invalid_answer_via_click": "rejected",
+    "new_puzzle_clears_input_and_solution": true,
+    "four_cards_visible": true,
+    "page_errors": []
+  },
+  "project": {
+    "status": "ready",
+    "preview_bytes": 462
+  },
+  "recovery_job": {
+    "status": "done",
+    "state": "PREVIEW_READY"
+  }
+}

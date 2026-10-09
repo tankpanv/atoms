@@ -1,0 +1,7 @@
+services:
+  app:
+    networks: [managed-database]
+networks:
+  managed-database:
+    external: true
+    name: ${APP_DATABASE_NETWORK:?Use the existing project database network}

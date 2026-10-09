@@ -1,0 +1,867 @@
+{
+  "project_id": "4a06357a-8c8f-4ee6-ba9b-593cdbd49445",
+  "method": "Playwright MCP registration and authenticated API, real billed DeepSeek model, stop then continue",
+  "automated_tests_passed": 41,
+  "frontend_build": "passed",
+  "jobs": [
+    {
+      "id": "90b6df75-97a9-4798-a3b3-ed42a0b9463d",
+      "status": "error",
+      "state": "FAILED",
+      "error": "[Errno 2] No such file or directory: '/model_list'"
+    },
+    {
+      "id": "5320b51c-1e86-475b-94b6-44b2107c0a25",
+      "status": "stopped",
+      "state": "STOPPED",
+      "error": ""
+    },
+    {
+      "id": "9493c2e9-2db7-4fad-9dfe-10a2701b9b47",
+      "status": "done",
+      "state": "COMPLETE",
+      "error": ""
+    }
+  ],
+  "session": {
+    "available": true,
+    "completed": true,
+    "messages": 13,
+    "compactions": 6,
+    "local_read_hits": 0,
+    "estimated_context_tokens": 22878,
+    "known_files": 8,
+    "updated_at": 1791008202.308911
+  },
+  "resume_steps": [
+    {
+      "kind": "result",
+      "label": "已恢复构建会话",
+      "detail": "恢复 32 条活动上下文、15 条操作记录；发现 0 个变化文件。保留已完成任务，不重新初始化项目。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "构建上下文已整理",
+      "detail": "当前估计 17872 tokens；任务继续。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "构建上下文已整理",
+      "detail": "当前估计 12590 tokens；任务继续。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "构建上下文已整理",
+      "detail": "当前估计 13436 tokens；任务继续。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "构建上下文已整理",
+      "detail": "当前估计 13105 tokens；任务继续。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "构建上下文已整理",
+      "detail": "当前估计 12429 tokens；任务继续。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "构建上下文已整理",
+      "detail": "当前估计 22167 tokens；任务继续。",
+      "token_usage": {}
+    },
+    {
+      "kind": "result",
+      "label": "代码复核通过",
+      "detail": "需求已全部真实实现并通过验收：greet.py 提供纯函数 greet(name=None, uppercase=False) 与 argparse CLI 入口，无参数输出 'hello world'、给出姓名输出 'hello <name>'、--uppercase/-u 将整行转大写（当前位置前后均可），参数错误由 argparse 写 stderr 并以退出码 2 结束、--help 退出码 0，均与 README 契约一致。tests/test_greet.py（17 例，纯函数层）与 tests/test_cli.py（16 例，subprocess 真实启动进程并断言 stdout/returncode）合计 33 例，unittest discover 实测 Ran 33 tests / OK / exit 0，非占位实现。README 含 Python 3.8+、零第三方依赖、三个示例及输出、退出码 0/2 语义与测试命令；git log 显示 T1..T7 逐任务提交且 git status 为空，符合拆分提交进度要求。无前端/后端/持久化属需求明确排除，模块职责划分合理。仅存无关紧要的文档小瑕疵（README 中 '``--uppercase` 前后位置都可以' 少一个反引号；greet.py 导入 List 未使用）以及实际多创建了计划中本想跳过的 .atoms-workspace.json（设为 services:[] 的纯 CLI 声明，无害且不影响功能），均不需功能性修改。",
+      "token_usage": {}
+    },
+    {
+      "kind": "state",
+      "label": "COMPLETE",
+      "detail": "文件已保存；需求验收及代码复核通过；已配置的构建与测试命令通过",
+      "token_usage": {}
+    }
+  ],
+  "resume_model_stages": [
+    "COMPACT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "COMPACT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "COMPACT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "COMPACT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "COMPACT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "COMPACT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "IMPLEMENT",
+    "REVIEW"
+  ],
+  "billing": [
+    {
+      "stage": "UNDERSTAND",
+      "status": "settled",
+      "prompt_tokens": 1185,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001295085000",
+      "charged_credits": "0.00611850",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "EXPLORE",
+      "status": "settled",
+      "prompt_tokens": 1654,
+      "completion_tokens": 64,
+      "provider_cost_usd": "0.000269310000",
+      "charged_credits": "0.00035740",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "EXPLORE",
+      "status": "settled",
+      "prompt_tokens": 1947,
+      "completion_tokens": 2500,
+      "provider_cost_usd": "0.001489608600",
+      "charged_credits": "0.00769470",
+      "cached_tokens": 1536
+    },
+    {
+      "stage": "PLAN",
+      "status": "settled",
+      "prompt_tokens": 2591,
+      "completion_tokens": 6877,
+      "provider_cost_usd": "0.004097770200",
+      "charged_credits": "0.02089010",
+      "cached_tokens": 1152
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10888,
+      "completion_tokens": 59,
+      "provider_cost_usd": "0.003337200000",
+      "charged_credits": "0.00126580",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13158,
+      "completion_tokens": 133,
+      "provider_cost_usd": "0.000908280000",
+      "charged_credits": "0.00171480",
+      "cached_tokens": 10880
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13383,
+      "completion_tokens": 357,
+      "provider_cost_usd": "0.000567204000",
+      "charged_credits": "0.00240930",
+      "cached_tokens": 13184
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13800,
+      "completion_tokens": 899,
+      "provider_cost_usd": "0.001192176000",
+      "charged_credits": "0.00407700",
+      "cached_tokens": 13696
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 14937,
+      "completion_tokens": 215,
+      "provider_cost_usd": "0.000449052000",
+      "charged_credits": "0.00213870",
+      "cached_tokens": 14592
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15194,
+      "completion_tokens": 196,
+      "provider_cost_usd": "0.000352824000",
+      "charged_credits": "0.00210740",
+      "cached_tokens": 15104
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 20978,
+      "completion_tokens": 464,
+      "provider_cost_usd": "0.002334360000",
+      "charged_credits": "0.00348980",
+      "cached_tokens": 15360
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 21462,
+      "completion_tokens": 419,
+      "provider_cost_usd": "0.000656856000",
+      "charged_credits": "0.00340320",
+      "cached_tokens": 21376
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 22114,
+      "completion_tokens": 313,
+      "provider_cost_usd": "0.000612360000",
+      "charged_credits": "0.00315040",
+      "cached_tokens": 21760
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 22783,
+      "completion_tokens": 113,
+      "provider_cost_usd": "0.000384900000",
+      "charged_credits": "0.00261730",
+      "cached_tokens": 22400
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 22948,
+      "completion_tokens": 200,
+      "provider_cost_usd": "0.000425904000",
+      "charged_credits": "0.00289480",
+      "cached_tokens": 22784
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 3083,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001271620000",
+      "charged_credits": "0.00630830",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 3083,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.000854442400",
+      "charged_credits": "0.00630830",
+      "cached_tokens": 3072
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 14319,
+      "completion_tokens": 50,
+      "provider_cost_usd": "0.002047179000",
+      "charged_credits": "0.00158190",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15085,
+      "completion_tokens": 312,
+      "provider_cost_usd": "0.000499957800",
+      "charged_credits": "0.00244450",
+      "cached_tokens": 14208
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15422,
+      "completion_tokens": 208,
+      "provider_cost_usd": "0.000391359600",
+      "charged_credits": "0.00216620",
+      "cached_tokens": 14976
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15651,
+      "completion_tokens": 116,
+      "provider_cost_usd": "0.000323031000",
+      "charged_credits": "0.00191310",
+      "cached_tokens": 15360
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15978,
+      "completion_tokens": 176,
+      "provider_cost_usd": "0.000370491600",
+      "charged_credits": "0.00212580",
+      "cached_tokens": 15616
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 16514,
+      "completion_tokens": 231,
+      "provider_cost_usd": "0.000444601200",
+      "charged_credits": "0.00234440",
+      "cached_tokens": 15872
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 24055,
+      "completion_tokens": 779,
+      "provider_cost_usd": "0.001735738200",
+      "charged_credits": "0.00474250",
+      "cached_tokens": 16512
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 24858,
+      "completion_tokens": 124,
+      "provider_cost_usd": "0.000537435600",
+      "charged_credits": "0.00285780",
+      "cached_tokens": 23936
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 25331,
+      "completion_tokens": 175,
+      "provider_cost_usd": "0.000519190200",
+      "charged_credits": "0.00305810",
+      "cached_tokens": 24832
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 3436,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001612476000",
+      "charged_credits": "0.00634360",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 9547,
+      "completion_tokens": 280,
+      "provider_cost_usd": "0.001162939800",
+      "charged_credits": "0.00179470",
+      "cached_tokens": 2688
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10072,
+      "completion_tokens": 108,
+      "provider_cost_usd": "0.000279067200",
+      "charged_credits": "0.00133120",
+      "cached_tokens": 9472
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10257,
+      "completion_tokens": 214,
+      "provider_cost_usd": "0.000299963400",
+      "charged_credits": "0.00166770",
+      "cached_tokens": 9984
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 14792,
+      "completion_tokens": 1567,
+      "provider_cost_usd": "0.001670004000",
+      "charged_credits": "0.00618020",
+      "cached_tokens": 10240
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 16383,
+      "completion_tokens": 138,
+      "provider_cost_usd": "0.000519867000",
+      "charged_credits": "0.00205230",
+      "cached_tokens": 14720
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 16745,
+      "completion_tokens": 328,
+      "provider_cost_usd": "0.000483150600",
+      "charged_credits": "0.00265850",
+      "cached_tokens": 16256
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 17327,
+      "completion_tokens": 166,
+      "provider_cost_usd": "0.000425115000",
+      "charged_credits": "0.00223070",
+      "cached_tokens": 16640
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 17748,
+      "completion_tokens": 414,
+      "provider_cost_usd": "0.000543132000",
+      "charged_credits": "0.00301680",
+      "cached_tokens": 17280
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 18196,
+      "completion_tokens": 333,
+      "provider_cost_usd": "0.000511886400",
+      "charged_credits": "0.00281860",
+      "cached_tokens": 17664
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 23029,
+      "completion_tokens": 179,
+      "provider_cost_usd": "0.001041510600",
+      "charged_credits": "0.00283990",
+      "cached_tokens": 18176
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 24069,
+      "completion_tokens": 1862,
+      "provider_cost_usd": "0.001536364200",
+      "charged_credits": "0.00799290",
+      "cached_tokens": 22912
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 4684,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001788444000",
+      "charged_credits": "0.00646840",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10354,
+      "completion_tokens": 120,
+      "provider_cost_usd": "0.003250200000",
+      "charged_credits": "0.00139540",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10495,
+      "completion_tokens": 273,
+      "provider_cost_usd": "0.000427908000",
+      "charged_credits": "0.00186850",
+      "cached_tokens": 10368
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10897,
+      "completion_tokens": 340,
+      "provider_cost_usd": "0.000516012000",
+      "charged_credits": "0.00210970",
+      "cached_tokens": 10752
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15836,
+      "completion_tokens": 619,
+      "provider_cost_usd": "0.002219616000",
+      "charged_credits": "0.00344060",
+      "cached_tokens": 11136
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 16911,
+      "completion_tokens": 518,
+      "provider_cost_usd": "0.000878004000",
+      "charged_credits": "0.00324510",
+      "cached_tokens": 16384
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 17643,
+      "completion_tokens": 294,
+      "provider_cost_usd": "0.000527748000",
+      "charged_credits": "0.00264630",
+      "cached_tokens": 17408
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 18147,
+      "completion_tokens": 99,
+      "provider_cost_usd": "0.004810260000",
+      "charged_credits": "0.00211170",
+      "cached_tokens": 2560
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 18349,
+      "completion_tokens": 856,
+      "provider_cost_usd": "0.001263420000",
+      "charged_credits": "0.00440290",
+      "cached_tokens": 17920
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 19493,
+      "completion_tokens": 244,
+      "provider_cost_usd": "0.000495900000",
+      "charged_credits": "0.00268130",
+      "cached_tokens": 19200
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 19902,
+      "completion_tokens": 467,
+      "provider_cost_usd": "0.000735672000",
+      "charged_credits": "0.00339120",
+      "cached_tokens": 19712
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 20402,
+      "completion_tokens": 498,
+      "provider_cost_usd": "0.000734712000",
+      "charged_credits": "0.00353420",
+      "cached_tokens": 20352
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 25397,
+      "completion_tokens": 980,
+      "provider_cost_usd": "0.002661084000",
+      "charged_credits": "0.00547970",
+      "cached_tokens": 20864
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 4497,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001159760000",
+      "charged_credits": "0.00644970",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10506,
+      "completion_tokens": 246,
+      "provider_cost_usd": "0.001360198800",
+      "charged_credits": "0.00178860",
+      "cached_tokens": 2048
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15333,
+      "completion_tokens": 1974,
+      "provider_cost_usd": "0.001943346600",
+      "charged_credits": "0.00745530",
+      "cached_tokens": 10496
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 19638,
+      "completion_tokens": 1297,
+      "provider_cost_usd": "0.001567525200",
+      "charged_credits": "0.00585480",
+      "cached_tokens": 15232
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 20976,
+      "completion_tokens": 1023,
+      "provider_cost_usd": "0.001049378400",
+      "charged_credits": "0.00516660",
+      "cached_tokens": 19584
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 22184,
+      "completion_tokens": 728,
+      "provider_cost_usd": "0.000890894400",
+      "charged_credits": "0.00440240",
+      "cached_tokens": 20864
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 22945,
+      "completion_tokens": 214,
+      "provider_cost_usd": "0.000545867400",
+      "charged_credits": "0.00293650",
+      "cached_tokens": 22144
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 23312,
+      "completion_tokens": 1206,
+      "provider_cost_usd": "0.001059643200",
+      "charged_credits": "0.00594920",
+      "cached_tokens": 22912
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 24558,
+      "completion_tokens": 413,
+      "provider_cost_usd": "0.000739347600",
+      "charged_credits": "0.00369480",
+      "cached_tokens": 23296
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 2946,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001252440000",
+      "charged_credits": "0.00629460",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 9717,
+      "completion_tokens": 744,
+      "provider_cost_usd": "0.003017628000",
+      "charged_credits": "0.00320370",
+      "cached_tokens": 2688
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 10601,
+      "completion_tokens": 412,
+      "provider_cost_usd": "0.000626508000",
+      "charged_credits": "0.00229610",
+      "cached_tokens": 10368
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 11204,
+      "completion_tokens": 219,
+      "provider_cost_usd": "0.000387648000",
+      "charged_credits": "0.00177740",
+      "cached_tokens": 11008
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 11661,
+      "completion_tokens": 271,
+      "provider_cost_usd": "0.000474252000",
+      "charged_credits": "0.00197910",
+      "cached_tokens": 11392
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13260,
+      "completion_tokens": 257,
+      "provider_cost_usd": "0.000786624000",
+      "charged_credits": "0.00209700",
+      "cached_tokens": 11904
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13585,
+      "completion_tokens": 123,
+      "provider_cost_usd": "0.000271740000",
+      "charged_credits": "0.00172750",
+      "cached_tokens": 13440
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13854,
+      "completion_tokens": 71,
+      "provider_cost_usd": "0.000214776000",
+      "charged_credits": "0.00159840",
+      "cached_tokens": 13696
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 13947,
+      "completion_tokens": 175,
+      "provider_cost_usd": "0.000329844000",
+      "charged_credits": "0.00191970",
+      "cached_tokens": 13824
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 15595,
+      "completion_tokens": 162,
+      "provider_cost_usd": "0.000733380000",
+      "charged_credits": "0.00204550",
+      "cached_tokens": 14080
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 17265,
+      "completion_tokens": 148,
+      "provider_cost_usd": "0.000728364000",
+      "charged_credits": "0.00217050",
+      "cached_tokens": 15744
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 18003,
+      "completion_tokens": 319,
+      "provider_cost_usd": "0.000665748000",
+      "charged_credits": "0.00275730",
+      "cached_tokens": 17408
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 22742,
+      "completion_tokens": 451,
+      "provider_cost_usd": "0.001982424000",
+      "charged_credits": "0.00362720",
+      "cached_tokens": 18304
+    },
+    {
+      "stage": "COMPACT",
+      "status": "settled",
+      "prompt_tokens": 4517,
+      "completion_tokens": 2000,
+      "provider_cost_usd": "0.001161360000",
+      "charged_credits": "0.00645170",
+      "cached_tokens": 0
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 18182,
+      "completion_tokens": 653,
+      "provider_cost_usd": "0.005447928000",
+      "charged_credits": "0.00377720",
+      "cached_tokens": 2688
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 19234,
+      "completion_tokens": 384,
+      "provider_cost_usd": "0.000699096000",
+      "charged_credits": "0.00307540",
+      "cached_tokens": 18816
+    },
+    {
+      "stage": "IMPLEMENT",
+      "status": "settled",
+      "prompt_tokens": 19736,
+      "completion_tokens": 986,
+      "provider_cost_usd": "0.001346304000",
+      "charged_credits": "0.00493160",
+      "cached_tokens": 19584
+    },
+    {
+      "stage": "REVIEW",
+      "status": "settled",
+      "prompt_tokens": 27623,
+      "completion_tokens": 2477,
+      "provider_cost_usd": "0.011259300000",
+      "charged_credits": "0.01019330",
+      "cached_tokens": 0
+    }
+  ],
+  "total_provider_cached_tokens": 972416,
+  "unsettled_requests": 0,
+  "worker_and_service_restart": {
+    "passed": true,
+    "session_unchanged": true,
+    "services_healthy": true
+  }
+}

@@ -1,0 +1,238 @@
+name: ${COMPOSE_PROJECT_NAME:-atoms-demo}
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atoms-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-atoms-minio-local-password}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-29117}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-29118}:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/ready"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  db:
+    restart: unless-stopped
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-atoms_demo}
+      POSTGRES_USER: ${POSTGRES_USER:-atoms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atoms_local_password}
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-25432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    restart: unless-stopped
+    image: ${AGENT_IMAGE:-atoms-demo-backend}
+    build:
+      context: ./backend
+      network: host
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-atoms}:${POSTGRES_PASSWORD:-atoms_local_password}@db:5432/${POSTGRES_DB:-atoms_demo}
+      MINIO_ENDPOINT_URL: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-atoms-published}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-atoms-minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-atoms-minio-local-password}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      PYTHONDONTWRITEBYTECODE: "1"
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://openrouter.ai/api/v1}
+      AI_MODEL: ${AI_MODEL:-openai/gpt-6-luna}
+      MODEL_LIST_PATH: /model_list
+      TRANSCRIPTION_API_KEY: ${TRANSCRIPTION_API_KEY:-}
+      TRANSCRIPTION_BASE_URL: ${TRANSCRIPTION_BASE_URL:-https://openrouter.ai/api/v1}
+      AUTH_SECURE_COOKIE: ${AUTH_SECURE_COOKIE:-false}
+      ACCOUNT_CONNECTOR_AUTH_URLS: ${ACCOUNT_CONNECTOR_AUTH_URLS:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-}
+      GITHUB_TOKEN_ENCRYPTION_KEY: ${GITHUB_TOKEN_ENCRYPTION_KEY:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      PUBLISH_PUBLIC_HOST: ${PUBLISH_PUBLIC_HOST:-}
+      AGENT_SECRET: ${AGENT_SECRET:-}
+      AGENT_SERVICES: ${AGENT_SERVICES:-http://agent-service:9001}
+      WORKSPACE_ROOT: /workspaces
+      AUTH_PRIVATE_KEY_PATH: /var/lib/atoms/auth_private.pem
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-28080}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./model_list:/model_list:ro
+      - agent_workspaces:/workspaces
+      - platform_state:/var/lib/atoms
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  agent-service:
+    restart: unless-stopped
+    image: ${AGENT_IMAGE:-atoms-demo-backend}
+    command: ["uvicorn", "agent_service:app", "--host", "0.0.0.0", "--port", "9001"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-atoms}:${POSTGRES_PASSWORD:-atoms_local_password}@db:5432/${POSTGRES_DB:-atoms_demo}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://openrouter.ai/api/v1}
+      AI_MODEL: ${AI_MODEL:-openai/gpt-6-luna}
+      MODEL_LIST_PATH: /model_list
+      AI_UNDERSTAND_MODEL: ${AI_UNDERSTAND_MODEL:-}
+      AI_PLAN_MODEL: ${AI_PLAN_MODEL:-}
+      AI_IMPLEMENT_MODEL: ${AI_IMPLEMENT_MODEL:-}
+      AI_REVIEW_MODEL: ${AI_REVIEW_MODEL:-}
+      AGENT_MAX_ITERATIONS: ${AGENT_MAX_ITERATIONS:-200}
+      AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-15000000}
+      AGENT_BUILD_NORMAL_MULTIPLIER: ${AGENT_BUILD_NORMAL_MULTIPLIER:-1}
+      AGENT_BUILD_DEEP_MULTIPLIER: ${AGENT_BUILD_DEEP_MULTIPLIER:-2}
+      AGENT_BUILD_ADVANCED_MULTIPLIER: ${AGENT_BUILD_ADVANCED_MULTIPLIER:-3}
+      # Keep a coherent multi-file working set by default. The agent still
+      # clamps this to the selected model's hard context limit; override for
+      # constrained providers or cost-sensitive deployments.
+      AGENT_CONTEXT_TOKENS: ${AGENT_CONTEXT_TOKENS:-512000}
+      AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-}
+      AGENT_SECRET: ${AGENT_SECRET:-}
+      AGENT_IMAGE: ${AGENT_IMAGE:-atoms-demo-backend}
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-atoms-demo}
+      WORKSPACE_VOLUME: ${WORKSPACE_VOLUME:-${COMPOSE_PROJECT_NAME:-atoms-demo}_agent_workspaces}
+      PROJECT_RSS_LIMIT_MB: ${PROJECT_RSS_LIMIT_MB:-1536}
+      MAX_RUNNING_PROJECTS: ${MAX_RUNNING_PROJECTS:-8}
+      MAX_RETAINED_PROJECTS: ${MAX_RETAINED_PROJECTS:-20}
+      PROJECT_IDLE_SECONDS: ${PROJECT_IDLE_SECONDS:-120}
+      PROJECT_COLD_SECONDS: ${PROJECT_COLD_SECONDS:-300}
+      PROJECT_HOT_SECONDS: ${PROJECT_HOT_SECONDS:-3600}
+      PROJECT_MEMORY_MB: ${PROJECT_MEMORY_MB:-4096}
+      PROJECT_CPUS: ${PROJECT_CPUS:-2}
+      PROJECT_PIDS_LIMIT: ${PROJECT_PIDS_LIMIT:-512}
+      VISION_URL: ${VISION_URL:-http://vision:11434}
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5vl:3b}
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./model_list:/model_list:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_workspaces:/workspaces
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  vision:
+    restart: unless-stopped
+    image: ollama/ollama:latest
+    profiles: [vision]
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_KEEP_ALIVE: 5m
+    cpus: 4
+    mem_limit: 10g
+    volumes:
+      - vision_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  vision-init:
+    profiles: [vision]
+    image: ollama/ollama:latest
+    command: ["pull", "${VISION_MODEL:-qwen2.5vl:3b}"]
+    environment:
+      OLLAMA_HOST: vision:11434
+    depends_on:
+      vision:
+        condition: service_healthy
+
+
+  frontend:
+    restart: unless-stopped
+    image: ${FRONTEND_IMAGE:-atoms-demo-frontend}
+    build:
+      context: ./frontend
+      network: host
+      args:
+        VITE_PREVIEW_ORIGIN: ${VITE_PREVIEW_ORIGIN:-}
+        VITE_PREVIEW_PORT: ${PREVIEW_PORT:-28082}
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+      VITE_PREVIEW_PORT: ${PREVIEW_PORT:-28082}
+      VITE_PREVIEW_ORIGIN: ${VITE_PREVIEW_ORIGIN:-}
+    ports:
+      - "${FRONTEND_BIND:-0.0.0.0}:${FRONTEND_PORT:-25173}:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+      preview:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5173/"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  preview:
+    restart: unless-stopped
+    image: ${AGENT_IMAGE:-atoms-demo-backend}
+    command: ["uvicorn", "preview_gateway:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      PUBLISH_PUBLIC_HOST: ${PUBLISH_PUBLIC_HOST:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-atoms}:${POSTGRES_PASSWORD:-atoms_local_password}@db:5432/${POSTGRES_DB:-atoms_demo}
+      AGENT_SECRET: ${AGENT_SECRET:-}
+      AGENT_SERVICES: ${AGENT_SERVICES:-http://agent-service:9001}
+      WORKSPACE_ROOT: /workspaces
+      MODEL_LIST_PATH: /model_list
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "${PREVIEW_BIND:-0.0.0.0}:${PREVIEW_PORT:-28082}:8002"
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./model_list:/model_list:ro
+      - agent_workspaces:/workspaces
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_data:
+  minio_data:
+  agent_workspaces:
+    name: ${WORKSPACE_VOLUME:-${COMPOSE_PROJECT_NAME:-atoms-demo}_agent_workspaces}
+  platform_state:
+  vision_models:
+
+networks:
+  default:
+    name: ${COMPOSE_PROJECT_NAME:-atoms-demo}_default

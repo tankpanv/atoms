@@ -1,0 +1,5 @@
+{
+  "dev": "npm run dev -- --host 127.0.0.1 --port $PORT --strictPort --base $BASE_PATH",
+  "build": "npm run build",
+  "test": []
+}

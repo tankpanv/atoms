@@ -1,0 +1,8 @@
+node_modules
+dist
+.python-packages
+.atoms-data
+.atoms
+.env
+**/__pycache__
+.npm-cache

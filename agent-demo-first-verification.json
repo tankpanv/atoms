@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-06",
+  "project_id": "c6263e85-827a-440d-8fcd-616ab64dc91f",
+  "policy": "Demo-first; external configuration and unresolved acceptance gaps become explicit TODOs; independent work continues",
+  "verification": {
+    "base_scope": {
+      "tests": 107,
+      "skipped": 1,
+      "passed": true,
+      "log": "/tmp/atoms-demo-first-image.log"
+    },
+    "release_scope": {
+      "tests": 68,
+      "skipped": 1,
+      "passed": true,
+      "log": "/tmp/atoms-demo-first-release.log"
+    },
+    "real_project_chain": {
+      "saved_version": 1,
+      "startup": true,
+      "uploaded_items": 4,
+      "simulated": true,
+      "outfits": 3,
+      "quota_used": 1,
+      "quota_remaining": 4,
+      "reload_persistence": true,
+      "membership_dialog": true,
+      "mobile_overflow": false,
+      "javascript_errors": []
+    },
+    "real_project_log": "/tmp/atoms-outfit-demo-live.log",
+    "immutable_source_matches": {
+      "agent.py": "f610f032bdf3b5dc19dfa618c50ca938659c5082c58bf97633255f90393fe4bb",
+      "agent_harness.py": "662cacd6d3f8cd68ec279ea2a371934d1ae50322e6c66fb53f60efc9ce47d926",
+      "system_contract.py": "125733efe0ddb23d9266376dd4cc41aabb8e6066046a8c187e958a1938200379",
+      "agent_checks.py": "75ae906d29c40ab6f4d224b9db67a956ba6bf51a97e3f17a4bfb36a81a2d23bc",
+      "agent_delivery.py": "13ca055bba660b749974a38449922df7520b7841c03290b7f18a710c986455de",
+      "verification_policy.py": "87a60a3c644cb6a676069aa9279938f7f99867267037330ffd43828bdc73089a",
+      "agent_recovery.py": "48f7061042fecfbd8fd5a271e0eb0153e13960aa720e65d1c5d79f2628dd27dd",
+      "jobs.py": "0f9ff2df4a1fb164fbcdf6426decd28698a3a645f103e60d77fce23b05ca7013",
+      "templates/web-v1/docs/AGENT_GUIDE.md": "afe0d86a4788110617ecd8466b88543ba3e834e979a1a4f8e1e72a7bff48227f",
+      "tests/test_system_contract.py": "6e41e8ac8e675dbed1af19cb469511862bb869c8f54d6b7d3fe712693478c659",
+      "tests/test_agent_delivery.py": "f95d2c5da8267e85275cbced87efdae2ce1a699984a8724877298e992fe1f017",
+      "tests/test_agent_recovery.py": "b9b698e63ccdce803c91007f5559594a81fb1515355abcadf219544fd8cd32c4",
+      "tests/test_project_runtime.py": "89e69048853624eee7fa8f4b59705388d1f67786f01d0b2ffc3d3d89db8cdc6f"
+    }
+  },
+  "deployment": {
+    "image": "sha256:5408cd4a8d0515a88549ff109fcafef3a2a94bd151175fdd72e6d0c1e1243b78",
+    "rollback_image": "sha256:75043ef1b42e4b02f844040305c4635e5bb57c4955e0bbac82e0472fbee63790",
+    "active_tag": "atoms-demo-backend:latest",
+    "activation": "New and continued jobs use latest worker; current project repaired, built, started and saved as version 1"
+  },
+  "limits": [
+    "External AI provider is simulated and visibly labelled until configuration; real AI acceptance remains TODO",
+    "Harness regression tests validate current policy change; generated product delivered using actual build, service startup and browser interaction",
+    "Crashes and template placeholders cannot be marked demo-ready"
+  ]
+}

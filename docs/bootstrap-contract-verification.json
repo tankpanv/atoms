@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-04",
+  "affected_project": "5235fd568f524000b962458c494bd1da",
+  "root_cause": "Automatic bootstrap called nonexistent TaskLedger.record_evidence; real ledger API is record. Earlier CLI-only tests and non-Vite executor fixtures did not exercise automatic bootstrap receipt handoff.",
+  "fix": "Automatic CLI path now uses the same TaskLedger.record API as tool-driven evidence.",
+  "regression": {
+    "passed": 75,
+    "seconds": 43.452,
+    "new_tests": [
+      "empty Vite project successful initialization stores actual V1 receipt and reaches engineering",
+      "failed initialization stores nonzero receipt and cannot satisfy bootstrap gate",
+      "existing frontend is preserved and never reinitialized",
+      "TaskLedger/AgentSession/DeliveryBudget/ModelGateway direct calls in executor are checked against real method names and signatures"
+    ]
+  },
+  "real_cli_smoke": {
+    "exit_code": 0,
+    "receipt_id": "V1",
+    "handoff_reached": true,
+    "unix_uid": 195405932,
+    "model_provider_called": false,
+    "user_project_modified": false
+  },
+  "affected_files_preserved": {
+    "frontend/package.json": true,
+    "frontend/src/main.tsx": true,
+    ".atoms/task-state.json": true,
+    ".atoms/.agent-session/session.sqlite3": true
+  },
+  "image": "sha256:04b3ff2054b609fef3a667985dbc9d572d1dba2910c95e2869c1182addbab405",
+  "rollout": "New image deployed to backend and coordinator. Queued continuation upgrades obsolete workers while preserving project workspaces; active jobs are not interrupted.",
+  "mandatory_image_build_gate": {
+    "enabled": true,
+    "passed": 4,
+    "seconds": 2.417,
+    "command": "PYTHONPATH=/app python -m unittest discover -s tests -p test_bootstrap_contract.py -q",
+    "injected_original_defect_rejected": true,
+    "runtime_catalog_mount_not_required_for_tests": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-06",
+  "reference_project": "AI智能穿搭设计工具.zip",
+  "reference_finding": "frontend cloud SDK + localStorage demo; bundled backend not on core path; upload/AI flow explicitly unverified",
+  "template": "fullstack-v1/api-v1",
+  "version": "2026.10.06.1",
+  "changes": ["config settings", "routers/schemas/services module boundaries", "real /api/ready database probe", "backend vertical-slice README"],
+  "target_image": "sha256:343f31009f874e00c834b3e41dfd7d8cd6366f06f54a671e284e3cfd25a68672",
+  "active_tag": "atoms-demo-backend:latest",
+  "rollback_tag": "atoms-demo-backend:before-template-v1",
+  "verification": {"test_project_templates": "6 passed", "python_compile": true},
+  "docs": "docs/BACKEND_TEMPLATE_V1.md"
+}

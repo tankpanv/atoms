@@ -1,0 +1,33 @@
+{
+  "verified_at": "2026-10-04T06:44:48.107784+00:00",
+  "backend_image": "sha256:0418dc3c778d464d5dd88034f302957956c56b3c16e921761ea391de203e4096",
+  "template_version": "2026.10.04.4",
+  "image_checks": {
+    "bootstrap_tests": 4,
+    "regression_tests": 59,
+    "database_integration_skipped_at_image_build": 2
+  },
+  "deployed_tests": {
+    "real_connector_and_preview_tests": 9,
+    "agent_efficiency_execution_cleanup_tests": 18,
+    "frontend_production_build": "passed"
+  },
+  "playwright_mcp": {
+    "database_connector_probe": "passed",
+    "owner_config_download": "passed",
+    "cross_owner_config_access": "404 denied",
+    "application_viewer_CRUD": "passed",
+    "page_reload_persistence": "passed",
+    "frontend_api_restart_persistence": "passed",
+    "project_schema_isolation": "passed",
+    "one_click_application_only_Docker_deployment": "passed",
+    "deployment_reads_same_project_records": "passed",
+    "container_restart_persistence": "passed",
+    "project_delete_status": 204,
+    "schema_role_metadata_workspace_container_network_cleanup": "passed"
+  },
+  "existing_platform_projects": 30,
+  "connector_configured_projects": 30,
+  "test_projects_and_account_cleaned": true,
+  "new_PostgreSQL_containers_started": 0
+}

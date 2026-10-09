@@ -1,0 +1,26 @@
+{
+  "policy": "Complete all explicit requirements before demo fallback; complexity targets are soft pacing checkpoints",
+  "normal_iteration_limit": "configured AGENT_MAX_ITERATIONS",
+  "soft_targets": {
+    "simple": 16,
+    "medium": 40,
+    "complex": 120
+  },
+  "repair_limits": "half configured token and iteration limits; unchanged",
+  "regression": {
+    "passed": 86,
+    "seconds": 39.913
+  },
+  "mandatory_image_gate": {
+    "bootstrap_tests": 4,
+    "scene_stream_delivery_tests": 39
+  },
+  "new_integration_cases": [
+    "Planning already used 20 model calls; simple task completes normally under configured 120 call limit",
+    "Existing correct source is verified and completed without forced source modification",
+    "Three stagnant turns trigger full-scope guidance without changing budgets or delivery phase"
+  ],
+  "model_provider_calls_in_new_tests": false,
+  "real_cli_validation_in_new_tests": true,
+  "image": "sha256:270e11d5cb7093456372113263f315343945d1cb285ef82cc1117d15110b3bf3"
+}

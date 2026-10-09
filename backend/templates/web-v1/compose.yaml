@@ -1,0 +1,7 @@
+services:
+  app:
+    build:
+      context: .
+      network: ${BUILD_NETWORK:-host}
+    ports: ["${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-23871}:8080"]
+    restart: unless-stopped

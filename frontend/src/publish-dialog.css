@@ -1,0 +1,20 @@
+.publish-popover-layer{position:fixed;inset:44px 0 0;z-index:90;background:transparent}
+.publish-dialog{position:absolute;right:12px;top:5px;width:min(480px,calc(100vw - 24px));max-height:calc(100dvh - 68px);overflow:auto;padding:26px 24px 22px;border:1px solid #e1e1e1;border-radius:16px;background:#fff;color:#222;box-shadow:0 3px 14px #0002;font-size:14px}
+.publish-dialog h2{display:flex;align-items:center;gap:9px;font-size:23px;margin:0 30px 26px 0}
+.publish-dialog-close{position:absolute;right:15px;top:17px;display:grid;place-items:center;width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:#777}
+.publish-dialog-close:hover{background:#f3f3f3}
+.publish-dialog-close:disabled{opacity:.35}
+.publish-dialog-label{display:block;font-weight:600;font-size:16px;margin:0 0 12px}
+.publish-dialog-url{display:flex;align-items:center;border:1px solid #ddd;border-radius:12px;padding:0 13px;min-height:64px;gap:9px}
+.publish-dialog-url input{flex:1;min-width:0;width:100%;border:0;background:transparent;color:#333;outline:none;font-size:14px}
+.publish-dialog-url button{display:grid;place-items:center;flex:none;width:32px;height:32px;border:0;background:transparent;color:#555;border-radius:6px}
+.publish-dialog-url button:hover{background:#eee}.publish-dialog-url button:disabled{opacity:.35}
+.publish-settings{border:1px solid #ddd;border-radius:12px;margin-top:20px;overflow:hidden}
+.publish-settings-toggle{width:100%;height:60px;display:flex;align-items:center;justify-content:space-between;border:0;background:transparent;color:#222;padding:0 17px;font-size:15px}
+.publish-settings-toggle svg{transition:transform .15s}.publish-settings-toggle svg.expanded{transform:rotate(180deg)}
+.publish-settings-body{padding:0 17px 16px}.publish-settings-body>div{display:flex;align-items:center;justify-content:space-between;padding:15px;border:1px solid #eee;border-radius:10px}.publish-settings-body span{display:flex;align-items:center;gap:8px}.publish-settings-body p{font-size:12px;color:#888;line-height:1.6}.publish-offline-button{border:1px solid #ebcccc;background:#fff;color:#c44545;padding:8px 12px;border-radius:7px}
+.publish-dialog-footer{display:flex;align-items:center;gap:14px;margin-top:22px}.publish-dialog-primary,.publish-dialog-secondary{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;border:0;border-radius:8px;padding:9px 12px;font-size:14px;font-weight:600;text-decoration:none;cursor:pointer}.publish-dialog-primary{background:#4564ff;color:#fff}.publish-dialog-primary:disabled{background:#9eb1ff;cursor:default}.publish-dialog-secondary{background:#f1f1f1;color:#333}
+.publish-progress{flex:1;display:flex;align-items:center;gap:7px;color:#737f96;font-size:13px}.publish-online-dot{width:10px;height:10px;display:inline-block;background:#278744;border-radius:50%}.publish-online-row{display:flex;align-items:center;justify-content:space-between;border:1px solid #ddd;border-radius:11px;padding:15px;margin-bottom:20px}.publish-online-badge{padding:3px 8px;border-radius:5px;background:#d8eedf;color:#278744;font-size:12px;font-weight:600}
+.publish-dialog-error{color:#ba3a3a;background:#fff1f1;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.6}.publish-dialog-message{color:#888;font-size:13px;line-height:1.6}.publish-spin{animation:publish-spin 1s linear infinite}@keyframes publish-spin{to{transform:rotate(360deg)}}
+.publish-dialog-success{text-align:center}.publish-celebration{height:135px;display:flex;align-items:center;justify-content:space-evenly;background:linear-gradient(135deg,#9dc8ee,#a295e7);border-radius:12px;margin:0 0 20px;color:#fff;font-size:40px}.publish-celebration span:nth-child(2){font-size:64px}.publish-dialog .publish-success-title{justify-content:center;margin:0;font-size:21px}.publish-success-description{color:#888;font-size:14px;margin:9px 0 22px}.publish-dialog-success .publish-dialog-url{background:#f5f5f5;border:0;text-align:left}
+@media(max-width:680px){.publish-popover-layer{top:84px}.publish-dialog{padding:22px 18px;max-height:calc(100dvh - 105px)}}

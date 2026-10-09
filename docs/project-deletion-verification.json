@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-04",
+  "image": "sha256:dc1ef0dd8e8011ca3261ccedc7a6af94d4927c0ac47ce6ec32136400af16113e",
+  "fixture_project": "863fb922-9128-47c4-9f9d-8a84bc3bbf2a",
+  "browser": {
+    "row_hover_shows_more": true,
+    "button_hover_opens_menu": true,
+    "menu_visible_12px_outside": true,
+    "menu_closes_70px_outside": true,
+    "cancel_initial_focus": true,
+    "cancel_preserves_project": true,
+    "live_preview_before_delete": 200,
+    "confirm_delete_status": 204,
+    "row_removed": true,
+    "project_after_delete": 404,
+    "old_preview_after_delete": 404
+  },
+  "cleanup": {
+    "container_absent": true,
+    "network_absent": true,
+    "workspace_absent": true,
+    "database_role_absent": true,
+    "all_project_foreign_key_rows": 0,
+    "minio_objects_before": 2,
+    "minio_objects_after": 0,
+    "multipart_uploads_before": 2,
+    "multipart_uploads_after": 0,
+    "neighbour_project_preserved": true
+  },
+  "fault_checks": {
+    "foreign_owner": 404,
+    "concurrent_mutation": 409,
+    "injected_storage_outage": 503,
+    "failed_cleanup_preserves_deleting_record": true,
+    "work_during_failed_cleanup_blocked": 409,
+    "retry_delete_succeeds": 204
+  },
+  "regression": {
+    "cleanup_api_billing_bootstrap_tests": 24,
+    "worker_image_build_gates": 48,
+    "frontend_build": "passed"
+  }
+}

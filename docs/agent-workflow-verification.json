@@ -1,0 +1,425 @@
+{
+  "date": "2026-10-04",
+  "metagpt_commit": "11cdf466d042aece04fc6cfd13b28e1a70341b1f",
+  "deployed_image": "sha256:1218120fc4ae3677efd0edec788ce23d12a30cbdf8817f100c5f9ba079099afa",
+  "official_task": "https://atoms.dev/zh/chat/03c32b7767de4835bea9ece607030346",
+  "official_visible_steps": 6,
+  "official_calls_or_exact_elapsed_verified": false,
+  "regression": {
+    "run": 82,
+    "passed": 81,
+    "skipped": 1,
+    "seconds": 43.624,
+    "billing_uses_real_postgresql": true
+  },
+  "frontend_build_passed": true,
+  "jobs": [
+    {
+      "id": "085a854d-febb-4259-a9b8-4f4a505a138b",
+      "project_id": "66b42b0c-7e38-49b3-b2b2-3653c941f137",
+      "status": "stopped",
+      "state": "STOPPED",
+      "created_at": "2026-10-03 19:39:40.108045+00:00",
+      "updated_at": "2026-10-03 20:19:38.695864+00:00",
+      "elapsed_seconds": 2398.587819,
+      "billing": [
+        {
+          "status": "settled",
+          "stage": "COMPACT",
+          "calls": 8,
+          "tokens": "40860",
+          "credits": "0.03839300"
+        },
+        {
+          "status": "settled",
+          "stage": "IMPLEMENT",
+          "calls": 28,
+          "tokens": "598500",
+          "credits": "0.16765750"
+        },
+        {
+          "status": "settled",
+          "stage": "PLAN",
+          "calls": 2,
+          "tokens": "11105",
+          "credits": "0.01636450"
+        },
+        {
+          "status": "settled",
+          "stage": "STABILIZE",
+          "calls": 104,
+          "tokens": "2075969",
+          "credits": "0.38788700"
+        }
+      ],
+      "events": [
+        {
+          "kind": "thinking",
+          "count": 267
+        },
+        {
+          "kind": "usage",
+          "count": 141
+        },
+        {
+          "kind": "plan",
+          "count": 1
+        },
+        {
+          "kind": "result",
+          "count": 137
+        },
+        {
+          "kind": "tool",
+          "count": 194
+        },
+        {
+          "kind": "stop",
+          "count": 1
+        },
+        {
+          "kind": "state",
+          "count": 124
+        },
+        {
+          "kind": "warning",
+          "count": 59
+        }
+      ]
+    },
+    {
+      "id": "f4f442f8-0417-4e3d-a652-99be0beff680",
+      "project_id": "ebb89fff-99cf-43fb-be2a-5638416b8eb1",
+      "status": "done",
+      "state": "PREVIEW_READY",
+      "created_at": "2026-10-03 20:51:27.309476+00:00",
+      "updated_at": "2026-10-03 20:58:17.407348+00:00",
+      "elapsed_seconds": 410.097872,
+      "billing": [
+        {
+          "status": "settled",
+          "stage": "IMPLEMENT",
+          "calls": 11,
+          "tokens": "122983",
+          "credits": "0.07646150"
+        },
+        {
+          "status": "settled",
+          "stage": "PLAN",
+          "calls": 1,
+          "tokens": "3703",
+          "credits": "0.00575950"
+        },
+        {
+          "status": "settled",
+          "stage": "STABILIZE",
+          "calls": 6,
+          "tokens": "96266",
+          "credits": "0.05058100"
+        },
+        {
+          "status": "settled",
+          "stage": "TEST",
+          "calls": 1,
+          "tokens": "2153",
+          "credits": "0.00336650"
+        }
+      ],
+      "events": [
+        {
+          "kind": "plan",
+          "count": 1
+        },
+        {
+          "kind": "result",
+          "count": 9
+        },
+        {
+          "kind": "state",
+          "count": 11
+        },
+        {
+          "kind": "thinking",
+          "count": 27
+        },
+        {
+          "kind": "tool",
+          "count": 24
+        },
+        {
+          "kind": "usage",
+          "count": 19
+        },
+        {
+          "kind": "version",
+          "count": 1
+        },
+        {
+          "kind": "warning",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "62899e8c-a6c2-4ac4-b207-d59e536eaf31",
+      "project_id": "85da123f-8b19-440e-adc3-a1fbe34e7b2c",
+      "status": "error",
+      "state": "FAILED",
+      "created_at": "2026-10-03 21:03:15.897969+00:00",
+      "updated_at": "2026-10-03 21:08:03.855506+00:00",
+      "elapsed_seconds": 287.957537,
+      "billing": [
+        {
+          "status": "rejected",
+          "stage": "IMPLEMENT",
+          "calls": 1,
+          "tokens": "0",
+          "credits": null
+        },
+        {
+          "status": "settled",
+          "stage": "IMPLEMENT",
+          "calls": 5,
+          "tokens": "74736",
+          "credits": "0.04977800"
+        },
+        {
+          "status": "settled",
+          "stage": "PLAN",
+          "calls": 1,
+          "tokens": "4874",
+          "credits": "0.00868700"
+        }
+      ],
+      "events": [
+        {
+          "kind": "error",
+          "count": 1
+        },
+        {
+          "kind": "plan",
+          "count": 1
+        },
+        {
+          "kind": "result",
+          "count": 1
+        },
+        {
+          "kind": "state",
+          "count": 5
+        },
+        {
+          "kind": "thinking",
+          "count": 13
+        },
+        {
+          "kind": "tool",
+          "count": 8
+        },
+        {
+          "kind": "usage",
+          "count": 6
+        }
+      ]
+    },
+    {
+      "id": "0dd8b4b5-0bb1-41a6-817a-ce34108dc160",
+      "project_id": "85da123f-8b19-440e-adc3-a1fbe34e7b2c",
+      "status": "done",
+      "state": "PREVIEW_READY",
+      "created_at": "2026-10-03 21:17:51.728396+00:00",
+      "updated_at": "2026-10-03 21:22:28.061796+00:00",
+      "elapsed_seconds": 276.3334,
+      "billing": [
+        {
+          "status": "settled",
+          "stage": "IMPLEMENT",
+          "calls": 11,
+          "tokens": "192272",
+          "credits": "0.10281000"
+        },
+        {
+          "status": "settled",
+          "stage": "STABILIZE",
+          "calls": 4,
+          "tokens": "72670",
+          "credits": "0.03842300"
+        },
+        {
+          "status": "settled",
+          "stage": "TEST",
+          "calls": 1,
+          "tokens": "2861",
+          "credits": "0.00493050"
+        }
+      ],
+      "events": [
+        {
+          "kind": "plan",
+          "count": 1
+        },
+        {
+          "kind": "result",
+          "count": 9
+        },
+        {
+          "kind": "state",
+          "count": 9
+        },
+        {
+          "kind": "thinking",
+          "count": 24
+        },
+        {
+          "kind": "tool",
+          "count": 16
+        },
+        {
+          "kind": "usage",
+          "count": 16
+        },
+        {
+          "kind": "version",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "be7bd6b3-4093-4e25-b716-76dd214725fe",
+      "project_id": "85da123f-8b19-440e-adc3-a1fbe34e7b2c",
+      "status": "done",
+      "state": "PREVIEW_READY",
+      "created_at": "2026-10-03 21:27:19.329597+00:00",
+      "updated_at": "2026-10-03 21:31:50.792617+00:00",
+      "elapsed_seconds": 271.46302,
+      "billing": [
+        {
+          "status": "settled",
+          "stage": "IMPLEMENT",
+          "calls": 9,
+          "tokens": "109882",
+          "credits": "0.06246700"
+        },
+        {
+          "status": "settled",
+          "stage": "PLAN",
+          "calls": 3,
+          "tokens": "21788",
+          "credits": "0.01526800"
+        },
+        {
+          "status": "settled",
+          "stage": "STABILIZE",
+          "calls": 1,
+          "tokens": "16543",
+          "credits": "0.00916350"
+        },
+        {
+          "status": "settled",
+          "stage": "TEST",
+          "calls": 2,
+          "tokens": "5222",
+          "credits": "0.00892300"
+        }
+      ],
+      "events": [
+        {
+          "kind": "plan",
+          "count": 1
+        },
+        {
+          "kind": "result",
+          "count": 9
+        },
+        {
+          "kind": "state",
+          "count": 9
+        },
+        {
+          "kind": "thinking",
+          "count": 16
+        },
+        {
+          "kind": "tool",
+          "count": 10
+        },
+        {
+          "kind": "usage",
+          "count": 15
+        },
+        {
+          "kind": "version",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Official visible steps are not model-call counts; exact two-minute duration could not be independently verified.",
+    "PREVIEW_READY means actual runnable demo, not every contract independently reviewed COMPLETE.",
+    "A separate cold run encountered provider encrypted-endpoint/region 403 before targeted routing recovery was implemented. Recovery is regression tested; no claim that it triggered in a successful live request.",
+    "Cold success preceded CPU affinity and final grounded-scene fixes. Timings are not a controlled head-to-head benchmark.",
+    "Failed experiments and provider refusals remain in the audit; live app trials used real model calls."
+  ],
+  "process_stress": {
+    "forced_restarts": 30,
+    "checks_reused": 30,
+    "after_stress_build": 0,
+    "states": {},
+    "init": "docker-init",
+    "output": "\nup to date in 560ms\n\n> generated-product@1.0.0 build\n> npm --prefix frontend run build -- --base=./ --outDir ../dist\n\n\n> frontend@0.0.0 build\n> tsc -b && vite build --base=./ --outDir ../dist\n\nvite v8.3.2 building client environment for production...\ntransforming...\n✓ 33 modules transformed.\nrendering chunks...\ncomputing gzip size...\n../dist/index.html                   0.45 kB │ gzip:   0.30 kB\n../dist/assets/index-C9gIP-rd.css    5.01 kB │ gzip:   1.55 kB\n../dist/assets/index-Dj5Y3Jh3.js   458.18 kB │ gzip: 139.43 kB\n\n✓ built in 382ms\n",
+    "business_source_unchanged_from_original": true
+  },
+  "cpu_affinity_proof": {
+    "worker_project": "85da123f-8b19-440e-adc3-a1fbe34e7b2c",
+    "docker_init": true,
+    "cpuset": "44,45",
+    "node_available_parallelism": 2,
+    "host_cpu_count": 64,
+    "default_vitest_without_worker_overrides_passed": true,
+    "separate_fixture_vitest_tests": 30,
+    "separate_fixture_vitest_seconds": 3.58
+  },
+  "playwright_mcp_live_play": {
+    "project": "85da123f-8b19-440e-adc3-a1fbe34e7b2c",
+    "distinct_initial_decks": 4,
+    "initial_decks": [
+      [
+        1,
+        10,
+        7,
+        7
+      ],
+      [
+        4,
+        13,
+        10,
+        2
+      ],
+      [
+        3,
+        3,
+        5,
+        9
+      ],
+      [
+        3,
+        11,
+        10,
+        7
+      ]
+    ],
+    "random_games_played": 8,
+    "reference_answer_accepted_in_all_games": true,
+    "invalid_answer_rejected_in_all_games": true,
+    "new_puzzle_clears_input_and_hint": true,
+    "prior_cold_success_random_games_played": 10,
+    "application_viewer_iframe_verified": true,
+    "viewer_title": "玩转 24 点 · 脑力小站"
+  },
+  "final_image_scene_regression": {
+    "run": 9,
+    "passed": 9,
+    "seconds": 1.486
+  }
+}

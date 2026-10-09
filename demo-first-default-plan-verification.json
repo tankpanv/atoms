@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-06",
+  "policy": "new-project demo-first without skipping backend",
+  "order": [
+    "interface contract",
+    "complete frontend preview",
+    "real backend wiring",
+    "real startup acceptance"
+  ],
+  "template_version": "2026.10.06.1",
+  "worker_image": "sha256:438c925937c38e2c27c03fd6bfc8540f1a11da5af870e8b649dd872f93835de0",
+  "tests": {
+    "delivery_and_template": "passed",
+    "template_project_tests": "6 passed"
+  },
+  "docs": "docs/DEMO_FIRST_DEFAULT_PLAN.md",
+  "rollback_tag": "atoms-demo-backend:before-demo-first-template-v2"
+}

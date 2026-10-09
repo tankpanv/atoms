@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.auth_private.pem
+
+**/node_modules/
+**/dist/
+.env.*
+*.pem
+!.env.example

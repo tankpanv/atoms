@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-06",
+  "project_id": "f70ceb36-e7c8-4668-8e29-c6458c9d451a",
+  "observed_case": {
+    "job_id": "c9b10cbd-5468-4ade-968d-aa35f3077692",
+    "step_count": 1042,
+    "PLAN_model_calls": 68,
+    "IMPLEMENT_TEST_stage_rounds": 66,
+    "missing_dependency": "OPENAI_API_KEY",
+    "actual_AI_success": false,
+    "historical_delivery": "demo"
+  },
+  "deployment": {
+    "worker_image": "sha256:ac093fd6ee2d42fb553f6cc4149903b3ced932178ea2bff6b7deab610d46175b",
+    "previous_worker_image": "sha256:05613be6fde4dd69cc44cb3dfd4dcba552ed63a1d2cacff1c080744126fade15",
+    "tag": "atoms-demo-backend:system-contract-release",
+    "activation": "Next new or resumed job; busy workers and historical paid jobs not automatically restarted"
+  },
+  "checks": {
+    "bootstrap_contract": {
+      "tests": 4,
+      "passed": true
+    },
+    "worker_release_regressions": {
+      "tests": 233,
+      "skipped": 4,
+      "passed": true,
+      "log": "/tmp/atoms-system-contract-image.log"
+    },
+    "immutable_real_runtime": {
+      "passed": true,
+      "checks": [
+        "Vite/FastAPI actual build and isolated UID startup",
+        "Chromium create/reload persisted record",
+        "Actual service restart and business API readback",
+        "Actual final-delivery gate",
+        "Empty HTTP 200 rejected by JSON shape contract",
+        "Actual missing-key 503 detected",
+        "Source fix, real restart, successful response contract"
+      ],
+      "log": "/tmp/atoms-system-contract-immutable-runtime.log"
+    },
+    "source_hashes_match": true,
+    "hashes": {
+      "agent.py": "424a7b71840a449d842f565778e05d11662267ab3c0f36139f20e051ffbf9f00",
+      "agent_harness.py": "7d471bf71af97343450c991389e5fe5fb0f684b0d7d8e95c287dac0ae91b7fee",
+      "system_contract.py": "102a7710e28b76149c10d913003e941d70cd47e150632172a396776ef4440c88",
+      "runtime_assertions.py": "8b47c671f87a88b5786a896aa4f09e6fc3639ba5af15f19953d95f1db13b286b",
+      "agent_checks.py": "e33be1d402730c0a88dc103af610bf1682564a48d00a14f5ec7ba95a91331d5d",
+      "tool_specs.py": "3cf9f9a2286c35405e0a4ffc45316c78a8007df6f3a8007e89c47385d36f193a",
+      "jobs.py": "7c74799305a7cf8d814e103a7e2006b641dfa70af394be105d715e3ea4921d04",
+      "tests/test_system_contract.py": "51f5718a9f4bcedaef27d417048ae3d00e4cc47b43482567aae00cfcba79f2ff",
+      "tests/test_project_runtime.py": "f253c08ed9707a4d7f4f25d7d45a734ed5fca544b12d2c061914bb694c5524c0"
+    },
+    "test_environment_adjustment": "Docker default bridge had no npm route; immutable smoke ran successfully on actual atoms-demo_default deployment network"
+  },
+  "limitations": [
+    "Business AI provider remains unbound; genuine AI generation requires usable product service credentials",
+    "Legacy stored plans remain readable; fresh Web planning requires system_contract",
+    "No guarantee that arbitrary complex systems complete in one generation; actual success evidence remains mandatory"
+  ]
+}

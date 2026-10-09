@@ -1,0 +1,13 @@
+{
+  "dev": "npm run dev -- --host 127.0.0.1 --port $PORT --strictPort --base $BASE_PATH",
+  "build": "npm run build",
+  "test": [],
+  "services": [
+    {
+      "name": "api",
+      "command": "python -m uvicorn backend.app.main:app --host 127.0.0.1 --port $PORT",
+      "port_env": "API_PORT",
+      "ready_path": "/api/health"
+    }
+  ]
+}

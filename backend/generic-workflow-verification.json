@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-04",
+  "deployed_image": "sha256:c73a9b422587ea0e4d7e8e5f1728e1309e59990f76fc1dec182076d9af56ad5a",
+  "image_tests": {"total": 113, "passed": 111, "skipped_postgresql_integration": 2},
+  "bootstrap_contracts_passed": 4,
+  "focused_contract_and_browser_tests_passed": 50,
+  "real_chromium_checks": {
+    "delayed_503_rejects_optimistic_ready_page": true,
+    "http_200_wrong_json_rejected": true,
+    "expected_422_requires_explicit_response_assertion": true,
+    "write_and_reload_reads_actual_service_result": true,
+    "opaque_origin_custom_auth_headers": true
+  },
+  "generic_contracts": {
+    "form_echo_insufficient": true,
+    "fullstack_requires_api_and_subsequent_dom_result": true,
+    "body_visible_insufficient_for_requirement_evidence": true,
+    "new_operation_cannot_consume_old_response": true,
+    "source_version_bound_requirement_evidence": true,
+    "browser_requests_waited_with_finite_timeout": true,
+    "expected_errors_are_scoped_to_verified_responses": true
+  },
+  "limits": "These gates reject detected failures; requirement-specific coverage and database durability still require corresponding executable integration checks."
+}

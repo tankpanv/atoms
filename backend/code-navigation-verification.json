@@ -1,0 +1,667 @@
+{
+  "project_id": "ca434fd4-df14-4fce-816c-e3e7d8d46cb7",
+  "source_project": "a701b74d87b34c46a61362e188c16fe4",
+  "cold_index": {
+    "files": 111,
+    "reindexed_files": 111,
+    "reused_files": 0,
+    "bytes_read": 939877
+  },
+  "warm_index": {
+    "files": 111,
+    "reindexed_files": 0,
+    "reused_files": 111,
+    "bytes_read": 0
+  },
+  "success": true,
+  "duration_seconds": 103.84,
+  "model_calls": 5,
+  "read_calls": 6,
+  "total_tokens": 102682,
+  "cached_tokens": 50048,
+  "development_mode": "incremental",
+  "requirements": [
+    "真实后端注册与登录：邮箱 + 密码注册（唯一、格式与长度校验）、密码以 PBKDF2-SHA256 加盐哈希存储、登录成功签发不透明会话令牌，不存在假登录。",
+    "用户数据隔离与历史数据迁移：词库、学习进度、复习日志与统计全部按登录用户隔离；既有匿名数据由首个注册用户认领，不丢失也不泄漏给后续用户。",
+    "前端注册/登录界面与会话保持：未登录只显示认证面板，登录后进入原有学习应用；刷新保持登录，可登出退回认证面板。"
+  ],
+  "task_count": 2,
+  "preserved_requirements": 7,
+  "original_source_unchanged": true,
+  "cloned_business_source_unchanged": true,
+  "billing_statuses": [
+    "settled",
+    "settled",
+    "settled",
+    "settled",
+    "settled"
+  ],
+  "observations": [
+    {
+      "name": "read_code",
+      "input": "{\"path\": \"backend/app/auth.py\"}"
+    },
+    {
+      "name": "read_code",
+      "input": "{\"path\": \"backend/app/db.py\"}"
+    },
+    {
+      "name": "read_code",
+      "input": "{\"path\": \"backend/app/db.py\", \"start_line\": 100}"
+    },
+    {
+      "name": "read_code",
+      "input": "{\"path\": \"backend/app/routes.py\"}"
+    },
+    {
+      "name": "read_code",
+      "input": "{}"
+    },
+    {
+      "name": "read_code",
+      "input": "{\"path\": \"frontend/src/lib/api.ts\"}"
+    }
+  ],
+  "plan": {
+    "goal": "在当前单词速记应用上落地完整的注册/登录能力：真实后端账号（PBKDF2 哈希 + 会话令牌）、词库与学习进度按用户严格隔离、前端注册/登录面板与登录态保持及登出，并保证原有学习卡片、词库管理、统计与间隔重复流程回归可用。",
+    "requirements": [
+      {
+        "id": "R5",
+        "description": "真实后端注册与登录：邮箱 + 密码注册（唯一、格式与长度校验）、密码以 PBKDF2-SHA256 加盐哈希存储、登录成功签发不透明会话令牌，不存在假登录。",
+        "acceptance": [
+          "POST /api/auth/register 用新邮箱返回 201 与 {user, token}；同邮箱（含大小写不同）重复注册返回 409 且 detail 提示已注册",
+          "数据库中 users.password_hash 不含明文且以 pbkdf2_sha256$ 开头",
+          "POST /api/auth/login 正确凭证返回 200 与 token；错误密码或不存在邮箱返回 401「邮箱或密码不正确」",
+          "GET /api/auth/me 带有效令牌返回用户；POST /api/auth/logout 后同一令牌再访问 me 返回 401",
+          "未带令牌访问 /api/words、/api/study/next、/api/review、/api/stats 一律 401；/api/health 仍公开 200"
+        ],
+        "verification": "api"
+      },
+      {
+        "id": "R6",
+        "description": "用户数据隔离与历史数据迁移：词库、学习进度、复习日志与统计全部按登录用户隔离；既有匿名数据由首个注册用户认领，不丢失也不泄漏给后续用户。",
+        "acceptance": [
+          "用户 A 添加的单词不出现在用户 B 的 GET /api/words 中，B 删除或复习 A 的单词返回 404",
+          "A 复习推进阶段后 A 的统计与阶段变化，B 的统计与阶段不受影响",
+          "每个新注册用户默认获得一份独立内置词库，进度互不共享",
+          "在存在历史匿名数据的库上，首个注册用户的词条数 ≥ 历史数据且原 stages 保留；后续注册用户看不到历史自定义词"
+        ],
+        "verification": "api"
+      },
+      {
+        "id": "R7",
+        "description": "前端注册/登录界面与会话保持：未登录只显示认证面板，登录后进入原有学习应用；刷新保持登录，可登出退回认证面板。",
+        "acceptance": [
+          "未登录打开应用只显示 data-testid=auth-panel，学习卡片不可见",
+          "切到注册模式填写邮箱/密码/确认密码提交后进入学习界面，顶部显示该邮箱",
+          "登录时错误密码显示错误横幅（邮箱或密码不正确）并停留在认证面板",
+          "登录后刷新页面仍保持登录，待复习数与词库列表一致",
+          "点击 data-testid=btn-logout 回到认证面板，后续请求不再携带有效令牌"
+        ],
+        "verification": "browser"
+      }
+    ],
+    "change_map": [
+      {
+        "path": "frontend/src/components/AuthPanel.tsx",
+        "operation": "modify",
+        "reason": "核对/补齐登录-注册分段切换、字段内联校验、提交 loading 与错误横幅，以及 auth-panel/auth-tab-login/auth-tab-register/auth-email/auth-password/auth-confirm/auth-submit/auth-error 等验收钩子。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "c8e42c61ebdfc97af222c8005e7aee0bb1f5977603e19eacb4e4abd12dcc808b",
+        "imports": [
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/lib/api.ts",
+          "frontend/src/components/ui/button.tsx",
+          "frontend/src/components/ui/input.tsx",
+          "frontend/src/components/ui/label.tsx"
+        ],
+        "imported_by": [
+          "frontend/src/pages/Index.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/components/UserBar.tsx",
+        "operation": "modify",
+        "reason": "确认显示登录邮箱（auth-email-label）与退出按钮（btn-logout），登出含 loading 且失败可恢复。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "8b21267668cbd8adecd4bcdb659e7574008bf85a62306ce4664786b9df013820",
+        "imports": [
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/components/ui/button.tsx"
+        ],
+        "imported_by": [
+          "frontend/src/pages/Index.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/hooks/use-auth.tsx",
+        "operation": "modify",
+        "reason": "确认 AuthProvider 挂载时通过 /api/auth/me 恢复会话、401 时清空登录态，register/login/logout 状态流转正确（含 loading 与错误透传）。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "61c4265df708857a5ee4d55a54226db666ca3bfd64f26499367906f3cc87a901",
+        "imports": [
+          "frontend/src/lib/api.ts",
+          "frontend/src/types.ts"
+        ],
+        "imported_by": [
+          "frontend/src/App.tsx",
+          "frontend/src/components/AuthPanel.tsx",
+          "frontend/src/components/UserBar.tsx",
+          "frontend/src/pages/Index.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/lib/api.ts",
+        "operation": "modify",
+        "reason": "确认令牌持久化（localStorage wordrush.token）、api() 自动附加 X-Session-Token、401 触发 onUnauthorized 清会话，以及 auth 端点封装返回类型。",
+        "requirement_ids": [
+          "R5",
+          "R7"
+        ],
+        "source_sha": "6a73c6440b9173e5c219ecbe9f98358f0e2d2e8e6d92fb08ea73f18ab1123c50",
+        "imports": [
+          "frontend/src/types.ts"
+        ],
+        "imported_by": [
+          "frontend/src/components/AuthPanel.tsx",
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/pages/Index.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/pages/Index.tsx",
+        "operation": "modify",
+        "reason": "确认未登录仅渲染 AuthPanel（不预取受保护数据），已登录渲染 UserBar + 学习/词库/统计，登出后清空本地业务状态并回到认证面板。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "87d4aae6e5f946e80f8270b66a518fbe5a6d61935ac2d85d7286b8998e3705e9",
+        "imports": [
+          "frontend/src/components/AuthPanel.tsx",
+          "frontend/src/components/StudyCard.tsx",
+          "frontend/src/components/StatsPanel.tsx",
+          "frontend/src/components/UserBar.tsx",
+          "frontend/src/components/WordLibrary.tsx",
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/lib/api.ts",
+          "frontend/src/lib/format.ts",
+          "frontend/src/types.ts"
+        ],
+        "imported_by": [
+          "frontend/src/App.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/types.ts",
+        "operation": "modify",
+        "reason": "核对 AuthUser/AuthSession 等共享类型与后端响应结构一致（user:{id,email} 与 token）。",
+        "requirement_ids": [
+          "R5",
+          "R7"
+        ],
+        "source_sha": "a8bf8a3469b0a5c687b3bc7900c967f17eff579127dc37221f821402d8e530f5",
+        "imports": [],
+        "imported_by": [
+          "frontend/src/components/StatsPanel.tsx",
+          "frontend/src/components/StudyCard.tsx",
+          "frontend/src/components/WordLibrary.tsx",
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/lib/api.ts",
+          "frontend/src/pages/Index.tsx"
+        ]
+      },
+      {
+        "path": "frontend/tests/auth-flow.test.tsx",
+        "operation": "modify",
+        "reason": "补齐/确认未登录显示面板、注册进入应用、错误密码提示、登出后回退、刷新恢复会话等用例断言与 mock 契约。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "39bc803972bc2842c5bf2f44f85c73042400da1154ece9fb179831816b9735ef",
+        "imports": [],
+        "imported_by": []
+      },
+      {
+        "path": "frontend/tests/study-flow.test.tsx",
+        "operation": "modify",
+        "reason": "在 mock 中补齐 /api/auth/me 与 X-Session-Token 期望，让原有 4 个学习流程用例在鉴权门后继续通过（旧功能回归）。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "0460e06c8fa4c729cc414ed51eff6589f7b683a0c5975369876fb5d7559cdbdc",
+        "imports": [],
+        "imported_by": []
+      },
+      {
+        "path": "backend/app/auth.py",
+        "operation": "modify",
+        "reason": "核实 PBKDF2 哈希/校验（hmac.compare_digest）、create_user/authenticate/issue_session/revoke_session/user_from_token 的返回契约与错误语义，确保与路由、隔离测试一致且不存在明文或绕过路径。",
+        "requirement_ids": [
+          "R5"
+        ],
+        "source_sha": "05452291b200bb847ffbd1bbb6b828d3de2d1d732436c717a988a2367e122367",
+        "imports": [],
+        "imported_by": [
+          "backend/app/routes.py",
+          "backend/tests/test_auth.py"
+        ]
+      },
+      {
+        "path": "backend/app/db.py",
+        "operation": "modify",
+        "reason": "核实 users/sessions DDL、words.user_id 与 (user_id, lower(term)) 唯一索引、匿名数据认领与内置词库播种的幂等/事务语义。",
+        "requirement_ids": [
+          "R5",
+          "R6"
+        ],
+        "source_sha": "1df1a83363a1b9f60160483dd3720caf53e7156f4c37fc68c025c31b5d474aac",
+        "imports": [],
+        "imported_by": [
+          "backend/app/main.py",
+          "backend/app/routes.py",
+          "backend/tests/test_api_flow.py",
+          "backend/tests/test_auth.py",
+          "backend/tests/test_storage.py"
+        ]
+      },
+      {
+        "path": "backend/app/routes.py",
+        "operation": "modify",
+        "reason": "核实 require_user 依赖、auth 路由状态码与错误 detail、既有 words/study/review/stats 的 user_id 过滤与跨用户 404。",
+        "requirement_ids": [
+          "R5",
+          "R6"
+        ],
+        "source_sha": "6c9e05adf142b77c85f2e351bc350f33a492a9b4571193ce1b903adf010c479b",
+        "imports": [
+          "backend/app/auth.py",
+          "backend/app/db.py",
+          "backend/app/scheduling.py"
+        ],
+        "imported_by": [
+          "backend/app/main.py"
+        ]
+      },
+      {
+        "path": "backend/tests/test_auth.py",
+        "operation": "modify",
+        "reason": "确认覆盖注册/重复 409/哈希非明文/登录成功与失败 401/me/logout 失效/无令牌 401/两用户词库与进度互不可见互删。",
+        "requirement_ids": [
+          "R5",
+          "R6"
+        ],
+        "source_sha": "f41aa32332eb1c5ae9d6c827b52a8b67af278864d83330dccd1dba3907ce7dbd",
+        "imports": [
+          "backend/app/auth.py",
+          "backend/app/db.py",
+          "backend/app/main.py"
+        ],
+        "imported_by": []
+      },
+      {
+        "path": "backend/tests/test_api_flow.py",
+        "operation": "modify",
+        "reason": "确认已加入注册登录 fixture，原学习/词库/统计断言逻辑不变，作为旧接口回归。",
+        "requirement_ids": [
+          "R5",
+          "R6"
+        ],
+        "source_sha": "d6f5da71678ca9ad0ccc37a09afa3485e095313e3fb68a91edfad306d16063f3",
+        "imports": [
+          "backend/app/main.py",
+          "backend/app/db.py",
+          "backend/app/scheduling.py"
+        ],
+        "imported_by": []
+      },
+      {
+        "path": "DESIGN.md",
+        "operation": "modify",
+        "reason": "沿用既有 token 与安静学习工具气质，补充认证面板的版式与状态（居中单列卡片、错误/加载态、窄屏行为）。",
+        "requirement_ids": [
+          "R7"
+        ],
+        "source_sha": "7060dd21d91d5c9437e6a71b6c5576c1891c33ed2918aad77be922c36d31828a",
+        "imports": [],
+        "imported_by": []
+      }
+    ],
+    "interfaces": [
+      {
+        "path": "backend/app/auth.py",
+        "exports": [
+          "hash_password(password: str) -> str",
+          "verify_password(password: str, stored: str) -> bool",
+          "create_user(db, email: str, password: str) -> dict | None",
+          "authenticate(db, email: str, password: str) -> dict | None",
+          "issue_session(db, user_id: int) -> str",
+          "revoke_session(db, token: str) -> None",
+          "user_from_token(db, token: str) -> dict | None"
+        ],
+        "consumers": [
+          "backend/app/routes.py",
+          "backend/tests/test_auth.py"
+        ]
+      },
+      {
+        "path": "backend/app/db.py",
+        "exports": [
+          "connection()",
+          "initialize()",
+          "database_schema()",
+          "seed_default_words(db, user_id: int) -> int",
+          "claim_anonymous_words(db, user_id: int) -> int"
+        ],
+        "consumers": [
+          "backend/app/main.py",
+          "backend/app/routes.py",
+          "backend/tests"
+        ]
+      },
+      {
+        "path": "backend/app/routes.py",
+        "exports": [
+          "read_session_token(request) -> str | None",
+          "require_user(request) -> dict",
+          "POST /api/auth/register | POST /api/auth/login | POST /api/auth/logout | GET /api/auth/me",
+          "GET /api/health, GET /api/study/next, POST /api/review, GET/POST /api/words, DELETE /api/words/{id}, GET /api/stats（全部按登录用户过滤）"
+        ],
+        "consumers": [
+          "backend/app/main.py",
+          "backend/tests"
+        ]
+      },
+      {
+        "path": "frontend/src/lib/api.ts",
+        "exports": [
+          "getAuthToken(): string | null",
+          "setAuthToken(token: string): void",
+          "clearAuthToken(): void",
+          "onUnauthorized(handler: (() => void) | null): void",
+          "api<T>(path: string, options?: RequestInit): Promise<T>",
+          "registerUser(email, password)",
+          "loginUser(email, password)",
+          "logoutUser()",
+          "fetchMe()",
+          "既有 fetchDueWord/submitReview/fetchWords/createWord/deleteWord/fetchStats"
+        ],
+        "consumers": [
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/pages/Index.tsx",
+          "frontend/tests"
+        ]
+      },
+      {
+        "path": "frontend/src/hooks/use-auth.tsx",
+        "exports": [
+          "AuthProvider",
+          "useAuth(): { user: AuthUser | null; loading: boolean; login(email, password): Promise<void>; register(email, password): Promise<void>; logout(): Promise<void> }"
+        ],
+        "consumers": [
+          "frontend/src/App.tsx",
+          "frontend/src/pages/Index.tsx",
+          "frontend/src/components/AuthPanel.tsx",
+          "frontend/src/components/UserBar.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/components/AuthPanel.tsx",
+        "exports": [
+          "default AuthPanel（data-testid: auth-panel, auth-tab-login, auth-tab-register, auth-email, auth-password, auth-confirm, auth-submit, auth-error）"
+        ],
+        "consumers": [
+          "frontend/src/pages/Index.tsx"
+        ]
+      },
+      {
+        "path": "frontend/src/components/UserBar.tsx",
+        "exports": [
+          "default UserBar（data-testid: auth-email-label, btn-logout）"
+        ],
+        "consumers": [
+          "frontend/src/pages/Index.tsx"
+        ]
+      }
+    ],
+    "design": "认证链路（增量叠加在既有全栈项目上，架构与启动命令不变）。身份通道：应用级不透明令牌存 localStorage（key wordrush.token），请求头 X-Session-Token（后端另兼容 Authorization: Bearer，避免与预览网关 Bearer 冲突）。密码用标准库 PBKDF2-SHA256，16 字节随机盐，格式 pbkdf2_sha256$210000$salt$hash，校验用 hmac.compare_digest。后端 auth 路由：register 201 {user,token}（邮箱 lower 规范化、格式与 8–128 长度校验、重复 409）、login 200 {user,token}（凭证错误统一 401「邮箱或密码不正确」）、logout 204 幂等删会话、me 200/401。require_user 依赖保护 words/study/review/stats，所有查询写入带 w.user_id = %s，跨用户访问返回 404；/api/health 保持公开。数据模型：users(id, email, password_hash, created_at) + lower(email) 唯一索引；sessions(token PK, user_id FK CASCADE, expires_at)；words 增 user_id 与 (user_id, lower(term)) 唯一索引，study_progress/review_logs 结构不变、经 words.user_id 归属。迁移：initialize() 幂等 DDL，匿名行（user_id IS NULL）由第一个注册用户在事务内认领并在认领后播种内置词库（ON CONFLICT DO NOTHING 保证不冲突），后续用户各获独立内置库。前端：AuthProvider 挂载时无令牌直接未登录、有令牌调 /api/auth/me 恢复；401 统一清令牌并回调 onUnauthorized 回登录态。未登录仅渲染 AuthPanel（≤440px 居中单列卡片，分段按钮切换登录/注册，注册模式含确认密码，内联邮箱/密码/一致性校验，提交 disabled + loading，服务端 detail 显示在错误横幅，aria-invalid 与 role=alert）。已登录渲染 UserBar（显示邮箱 + 退出）+ 原有学习/词库/统计三视图，登出清空本地业务数据避免残留。兼容性：旧学习卡片、词库练习、统计及全部 data-testid 保持不变，仅新增鉴权门；DESIGN.md 沿用既有 token，不引入新的视觉体系。",
+    "tasks": [
+      {
+        "id": "T1",
+        "title": "前端认证界面与会话保持收尾核对（AuthPanel/UserBar/AuthProvider/api 令牌通道）",
+        "requirement_ids": [
+          "R5",
+          "R7"
+        ],
+        "depends_on": [],
+        "files": [
+          "frontend/src/components/AuthPanel.tsx",
+          "frontend/src/components/UserBar.tsx",
+          "frontend/src/hooks/use-auth.tsx",
+          "frontend/src/lib/api.ts",
+          "frontend/src/pages/Index.tsx",
+          "frontend/src/types.ts",
+          "frontend/tests/auth-flow.test.tsx",
+          "frontend/tests/study-flow.test.tsx",
+          "DESIGN.md"
+        ],
+        "verification": "cd frontend && npm test（auth-flow 与 study-flow 全绿）；cd .. && npm run build 通过并输出根 dist；浏览器：未登录只见 auth-panel；auth-tab-register → 填 auth-email/auth-password/auth-confirm → auth-submit 进入学习界面且顶部 auth-email-label 显示邮箱；错误密码登录显示 auth-error「邮箱或密码不正确」；刷新后仍登录；btn-logout 回到 auth-panel。",
+        "status": "in_progress"
+      },
+      {
+        "id": "T2",
+        "title": "认证与隔离的端到端联调及旧功能回归（后端接口 + 真实浏览器全流程）",
+        "requirement_ids": [
+          "R5",
+          "R6",
+          "R7"
+        ],
+        "depends_on": [
+          "T1"
+        ],
+        "files": [
+          "backend/app/auth.py",
+          "backend/app/db.py",
+          "backend/app/routes.py",
+          "backend/tests/test_auth.py",
+          "backend/tests/test_api_flow.py",
+          "frontend/src/lib/api.ts",
+          "frontend/src/pages/Index.tsx"
+        ],
+        "verification": "python -m unittest discover -s backend/tests -v 全部通过（认证、隔离、迁移与旧学习流程回归）；对运行中的 API：register 201 → 大小写重复注册 409 → 错误密码 login 401 → 无令牌 /api/stats 401 → /api/health 200 → login 200 → me 200 → logout 后同一令牌 me 401；用户 B 访问/删除 A 的单词返回 404 且 B 有独立内置词库；浏览器完成注册→翻卡认识/不认识→新增词→统计→刷新数据一致→登出→重新登录，控制台与网络无报错。",
+        "status": "pending"
+      }
+    ],
+    "delivery_checks": {
+      "path": "/",
+      "actions": [
+        {
+          "action": "assert_text",
+          "selector": "[data-testid=auth-panel]",
+          "value": "登录"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=auth-tab-register]"
+        },
+        {
+          "action": "fill",
+          "selector": "[data-testid=auth-email]",
+          "value": "demo.user@example.com"
+        },
+        {
+          "action": "fill",
+          "selector": "[data-testid=auth-password]",
+          "value": "study-pass-123"
+        },
+        {
+          "action": "fill",
+          "selector": "[data-testid=auth-confirm]",
+          "value": "study-pass-123"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=auth-submit]"
+        },
+        {
+          "action": "assert_text",
+          "selector": "[data-testid=auth-email-label]",
+          "value": "demo.user@example.com"
+        },
+        {
+          "action": "reload"
+        },
+        {
+          "action": "assert_text",
+          "selector": "[data-testid=auth-email-label]",
+          "value": "demo.user@example.com"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=btn-logout]"
+        },
+        {
+          "action": "assert_text",
+          "selector": "[data-testid=auth-panel]",
+          "value": "登录"
+        },
+        {
+          "action": "fill",
+          "selector": "[data-testid=auth-email]",
+          "value": "demo.user@example.com"
+        },
+        {
+          "action": "fill",
+          "selector": "[data-testid=auth-password]",
+          "value": "wrong-pass-999"
+        },
+        {
+          "action": "click",
+          "selector": "[data-testid=auth-submit]"
+        },
+        {
+          "action": "assert_text",
+          "selector": "[data-testid=auth-error]",
+          "value": "邮箱或密码不正确"
+        }
+      ]
+    },
+    "assumptions": [
+      "沿用既有平台默认全栈模板与 .atoms-workspace.json 的 dev/build/test/dev services 配置，不改变架构与启动命令。",
+      "认证后端与前端骨架在上一轮已实现并通过单元测试，本轮以核实、补齐验收钩子与真实浏览器/API 联调为主，不重写基线函数。",
+      "无角色与权限分级需求，仅普通用户；不新增邮箱验证、找回密码、第三方登录等未要求能力。",
+      "历史匿名数据认领只发生一次（第一个注册用户），其余用户各自获得独立内置词库。"
+    ],
+    "application_type": "web",
+    "architecture": {
+      "backend": {
+        "directory": "backend",
+        "reason": "学习进度（阶段、下次复习时间、对错计数）与自定义词库必须跨会话持久化；间隔重复的调度计算属于服务端业务规则，不能只在浏览器内存或 localStorage 中维护。",
+        "required": true,
+        "stack": "FastAPI + PostgreSQL（平台数据库连接器，项目独立 Schema）"
+      },
+      "frontend": {
+        "directory": "frontend",
+        "stack": "Vite + React + TypeScript + shadcn/ui + Tailwind（平台默认模板）"
+      },
+      "persistence": "PostgreSQL 表：words(id GENERATED BY DEFAULT AS IDENTITY, term 唯一, phonetic, meaning, example, is_builtin, created_at)；study_progress(word_id 主键, stage, correct_count, wrong_count, last_reviewed_at, next_review_at)；review_logs(id, word_id, result, reviewed_at)。首次初始化时通过 ON CONFLICT (term) DO NOTHING 播种内置词库。无账号体系（用户未要求），使用单一学习档案，全部读写走 /api。"
+    },
+    "commands": {
+      "bootstrap": [],
+      "build": [
+        "npm run build"
+      ],
+      "dev": "npm run dev",
+      "test": [
+        "npm test",
+        "python -m unittest discover -s backend/tests"
+      ]
+    },
+    "development_mode": "incremental",
+    "baseline_goal": "在现有单词速记应用上增加完整的用户系统：真实后端注册/登录（密码哈希 + 会话令牌）、词库与学习进度按用户严格隔离、前端注册/登录界面与登录态保持、登出，并给出历史匿名数据的迁移策略；原有学习卡片、词库管理、统计与间隔重复功能保持可用。",
+    "preserve_requirements": [
+      {
+        "acceptance": [
+          "打开首页能看到一个英文单词（若词库为空则显示空状态）",
+          "点击\"显示释义\"后卡片显示中文释义与例句",
+          "点击\"认识\"后当前单词消失并换成另一个待复习单词，状态栏待复习数字减少或刷新",
+          "点击\"不认识\"后该单词的复习阶段被重置，下次复习时间更新"
+        ],
+        "description": "卡片式记忆练习：显示待复习单词，可翻转查看释义与例句，并用\"认识/不认识\"判定当前单词，判定后自动进入下一张卡片。",
+        "id": "R1",
+        "verification": "browser"
+      },
+      {
+        "acceptance": [
+          "在词库页填入单词与释义后提交，列表立即出现该词条",
+          "必填项为空时提交被拦截并显示字段错误",
+          "刷新页面后新增的词条仍然存在",
+          "删除自己添加的词条后列表不再显示该词条"
+        ],
+        "description": "自定义词库管理：可添加单词（单词/释义必填，音标与例句可选），在词库列表中查看所有单词及其学习阶段，并可删除非内置单词。",
+        "id": "R2",
+        "verification": "browser"
+      },
+      {
+        "acceptance": [
+          "连续对同一单词点击\"认识\"直到阶段达到已掌握阈值后，统计页已掌握数 +1",
+          "刷新页面后统计数字与词条阶段保持一致",
+          "对新词点击\"不认识\"后待复习数不减少（该词仍立即可复习）"
+        ],
+        "description": "学习进度持久化与统计：复习结果写入数据库，统计页展示总词数、学习中、已掌握与待复习数量，且刷新后不丢失。",
+        "id": "R3",
+        "verification": "browser"
+      },
+      {
+        "acceptance": [
+          "GET /api/health 返回 200 与 ok",
+          "GET /api/study/next、POST /api/review、GET /api/words POST/DELETE、GET /api/stats 返回约定 JSON 结构",
+          "python -m unittest discover -s backend/tests 通过（覆盖阶段推进、重置与写库后读回）"
+        ],
+        "description": "后端提供真实数据接口与间隔重复调度逻辑，并有针对调度规则与数据持久化的自动化测试。",
+        "id": "R4",
+        "verification": "api"
+      },
+      {
+        "acceptance": [
+          "POST /api/auth/register 用新邮箱返回 201 与 {user, token}；同邮箱（含大小写不同）重复注册返回 409 且 detail 提示已注册",
+          "数据库中 users.password_hash 不含明文密码且以 pbkdf2_sha256$ 开头",
+          "POST /api/auth/login 正确凭证返回 200 与 token；错误密码或不存在邮箱返回 401「邮箱或密码不正确」",
+          "GET /api/auth/me 带有效令牌返回用户；POST /api/auth/logout 后同一令牌再访问 me 返回 401",
+          "未带令牌访问 /api/words、/api/study/next、/api/review、/api/stats 一律返回 401；/api/health 仍公开 200"
+        ],
+        "description": "真实后端注册与登录：邮箱 + 密码注册（唯一、格式与长度校验）、密码以 PBKDF2-SHA256 加盐哈希存储、登录成功后签发会话令牌，任一步骤都不存在假登录。",
+        "id": "R5",
+        "verification": "api"
+      },
+      {
+        "acceptance": [
+          "用户 A 添加的单词不出现在用户 B 的 GET /api/words 中，B 也无法删除或复习 A 的单词（返回 404）",
+          "A 复习推进阶段后，A 的 /api/stats 与词条 stage 变化，B 的统计与阶段不受影响",
+          "每个新注册用户默认获得一份独立内置词库，且其初始进度为该用户自己的记录",
+          "在已存在历史匿名数据的库上，首个注册用户的词条数 ≥ 历史数据（含进度 stages 保留），后续注册用户看不到历史自定义词"
+        ],
+        "description": "用户数据隔离与历史数据迁移：词库、学习进度、复习日志与统计全部按登录用户隔离；既有匿名数据由首个注册用户认领，不丢失也不泄漏。",
+        "id": "R6",
+        "verification": "api"
+      },
+      {
+        "acceptance": [
+          "打开应用（未登录）显示注册/登录面板，学习卡片不可见",
+          "切换注册模式填写邮箱与密码后提交，直接进入学习界面且顶部显示该邮箱",
+          "登录时输入错误密码显示「邮箱或密码不正确」错误提示且停留在认证面板",
+          "登录后刷新页面仍保持登录状态与学习数据（待复习数、词库列表一致）",
+          "点击退出登录后回到认证面板，再次访问受保护接口不再携带有效令牌"
+        ],
+        "description": "前端注册/登录界面与会话保持：未登录时只显示认证面板，登录后进入原有学习应用；刷新页面保持登录，可登出退回认证面板。",
+        "id": "R7",
+        "verification": "browser"
+      }
+    ]
+  }
+}

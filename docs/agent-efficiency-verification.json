@@ -1,0 +1,443 @@
+{
+  "method": "Playwright MCP authenticated local UI and API; real billed DeepSeek model; original CLI, incremental CLI change, web build and resume; independent Playwright iframe clicks and reload",
+  "projects": [
+    {
+      "id": "c76f5b68-a701-4d78-ac27-a633a0abb3be",
+      "jobs": [
+        {
+          "id": "af179094-d07c-4bac-88f8-b1018c7ad398",
+          "status": "done",
+          "state": "COMPLETE",
+          "error": "",
+          "billing": {
+            "requests": 46,
+            "input_tokens": "627740",
+            "output_tokens": "21221",
+            "provider_cost_usd": "0.039272756000",
+            "charged_credits": "0.12643700",
+            "unsettled": 0,
+            "cached_input_tokens": "547328",
+            "cache_write_tokens": "0"
+          },
+          "stages": [
+            {
+              "stage": "IMPLEMENT",
+              "requests": 42,
+              "input_tokens": "582995",
+              "output_tokens": "15121"
+            },
+            {
+              "stage": "PLAN",
+              "requests": 2,
+              "input_tokens": "3640",
+              "output_tokens": "3703"
+            },
+            {
+              "stage": "REVIEW",
+              "requests": 2,
+              "input_tokens": "41105",
+              "output_tokens": "2397"
+            }
+          ],
+          "reuse_steps": [
+            {
+              "label": "复用规划源码观察",
+              "detail": "按内容哈希验证规划阶段读取的源码，直接交给实现阶段，不重复扫描。"
+            },
+            {
+              "label": "早期工具输出已整理",
+              "detail": "全文留在会话存储，可按输出 ID 读取；保留最近操作和工具配对，无需模型摘要调用。"
+            }
+          ],
+          "tools": [
+            {
+              "tool_name": "apply_patch",
+              "calls": 2
+            },
+            {
+              "tool_name": "get_tasks",
+              "calls": 1
+            },
+            {
+              "tool_name": "list_files",
+              "calls": 2
+            },
+            {
+              "tool_name": "read_file",
+              "calls": 2
+            },
+            {
+              "tool_name": "replace_in_file",
+              "calls": 3
+            },
+            {
+              "tool_name": "run_build",
+              "calls": 3
+            },
+            {
+              "tool_name": "run_shell",
+              "calls": 12
+            },
+            {
+              "tool_name": "update_task",
+              "calls": 5
+            },
+            {
+              "tool_name": "write_file",
+              "calls": 14
+            }
+          ]
+        },
+        {
+          "id": "ad91e757-042b-4fad-b6b6-35867f4c1e64",
+          "status": "done",
+          "state": "COMPLETE",
+          "error": "",
+          "billing": {
+            "requests": 44,
+            "input_tokens": "800632",
+            "output_tokens": "29782",
+            "provider_cost_usd": "0.053326267400",
+            "charged_credits": "0.16940920",
+            "unsettled": 0,
+            "cached_input_tokens": "674816",
+            "cache_write_tokens": "0"
+          },
+          "stages": [
+            {
+              "stage": "COMPACT",
+              "requests": 1,
+              "input_tokens": "2759",
+              "output_tokens": "1494"
+            },
+            {
+              "stage": "IMPLEMENT",
+              "requests": 34,
+              "input_tokens": "609340",
+              "output_tokens": "17161"
+            },
+            {
+              "stage": "PLAN",
+              "requests": 3,
+              "input_tokens": "44949",
+              "output_tokens": "5891"
+            },
+            {
+              "stage": "REVIEW",
+              "requests": 6,
+              "input_tokens": "143584",
+              "output_tokens": "5236"
+            }
+          ],
+          "reuse_steps": [
+            {
+              "label": "已加载项目记忆",
+              "detail": "沿用已确认的架构和实现记录；只分析当前新增要求及变化文件。"
+            },
+            {
+              "label": "复用规划源码观察",
+              "detail": "按内容哈希验证规划阶段读取的源码，直接交给实现阶段，不重复扫描。"
+            },
+            {
+              "label": "正在整理构建上下文",
+              "detail": "保存完整会话和工具结果，压缩早期内容后自动继续。"
+            },
+            {
+              "label": "构建上下文已整理",
+              "detail": "当前估计 12340 tokens；任务继续。"
+            },
+            {
+              "label": "早期工具输出已整理",
+              "detail": "全文留在会话存储，可按输出 ID 读取；保留最近操作和工具配对，无需模型摘要调用。"
+            }
+          ],
+          "tools": [
+            {
+              "tool_name": "apply_patch",
+              "calls": 1
+            },
+            {
+              "tool_name": "list_files",
+              "calls": 1
+            },
+            {
+              "tool_name": "read_file",
+              "calls": 12
+            },
+            {
+              "tool_name": "replace_in_file",
+              "calls": 6
+            },
+            {
+              "tool_name": "run_shell",
+              "calls": 13
+            },
+            {
+              "tool_name": "search_files",
+              "calls": 1
+            },
+            {
+              "tool_name": "update_task",
+              "calls": 4
+            },
+            {
+              "tool_name": "write_file",
+              "calls": 4
+            }
+          ]
+        }
+      ],
+      "session_state": {
+        "completed": true,
+        "compactions": 1,
+        "prunes": 1,
+        "pruned_tokens": 9848,
+        "local_read_hits": 0,
+        "output_chars_saved": 9047
+      },
+      "session": {
+        "available": true,
+        "completed": true,
+        "messages": 53,
+        "compactions": 1,
+        "local_read_hits": 0,
+        "prunes": 1,
+        "pruned_tokens": 9848,
+        "output_chars_saved": 9047,
+        "estimated_context_tokens": 26438,
+        "known_files": 510,
+        "updated_at": 1791010466.658022
+      }
+    },
+    {
+      "id": "64ded7ca-2a50-4922-b165-2345fae1db23",
+      "jobs": [
+        {
+          "id": "c5a61fc1-1e92-4396-9262-6362e6365bde",
+          "status": "error",
+          "state": "FAILED",
+          "error": "代码复核模型连续返回无效 JSON；构建已通过，但无法确认复核结果",
+          "billing": {
+            "requests": 42,
+            "input_tokens": "628199",
+            "output_tokens": "35059",
+            "provider_cost_usd": "0.034250625000",
+            "charged_credits": "0.16799690",
+            "unsettled": 0,
+            "cached_input_tokens": "492800",
+            "cache_write_tokens": "0"
+          },
+          "stages": [
+            {
+              "stage": "COMPACT",
+              "requests": 1,
+              "input_tokens": "3895",
+              "output_tokens": "650"
+            },
+            {
+              "stage": "IMPLEMENT",
+              "requests": 31,
+              "input_tokens": "498747",
+              "output_tokens": "18842"
+            },
+            {
+              "stage": "PLAN",
+              "requests": 2,
+              "input_tokens": "3754",
+              "output_tokens": "3433"
+            },
+            {
+              "stage": "REVIEW",
+              "requests": 8,
+              "input_tokens": "121803",
+              "output_tokens": "12134"
+            }
+          ],
+          "reuse_steps": [
+            {
+              "label": "复用规划源码观察",
+              "detail": "按内容哈希验证规划阶段读取的源码，直接交给实现阶段，不重复扫描。"
+            },
+            {
+              "label": "早期工具输出已整理",
+              "detail": "全文留在会话存储，可按输出 ID 读取；保留最近操作和工具配对，无需模型摘要调用。"
+            },
+            {
+              "label": "正在整理构建上下文",
+              "detail": "保存完整会话和工具结果，压缩早期内容后自动继续。"
+            },
+            {
+              "label": "构建上下文已整理",
+              "detail": "当前估计 14108 tokens；任务继续。"
+            }
+          ],
+          "tools": [
+            {
+              "tool_name": "browser_check",
+              "calls": 4
+            },
+            {
+              "tool_name": "delete_file",
+              "calls": 7
+            },
+            {
+              "tool_name": "get_tasks",
+              "calls": 1
+            },
+            {
+              "tool_name": "list_files",
+              "calls": 4
+            },
+            {
+              "tool_name": "read_file",
+              "calls": 13
+            },
+            {
+              "tool_name": "replace_in_file",
+              "calls": 3
+            },
+            {
+              "tool_name": "run_build",
+              "calls": 2
+            },
+            {
+              "tool_name": "run_shell",
+              "calls": 8
+            },
+            {
+              "tool_name": "runtime_check",
+              "calls": 2
+            },
+            {
+              "tool_name": "scaffold_project",
+              "calls": 1
+            },
+            {
+              "tool_name": "update_task",
+              "calls": 6
+            },
+            {
+              "tool_name": "write_file",
+              "calls": 23
+            }
+          ]
+        },
+        {
+          "id": "abc7ef5b-2e79-465a-8e3e-059e50f42d7d",
+          "status": "done",
+          "state": "COMPLETE",
+          "error": "",
+          "billing": {
+            "requests": 11,
+            "input_tokens": "188376",
+            "output_tokens": "5322",
+            "provider_cost_usd": "0.013648116000",
+            "charged_credits": "0.03480360",
+            "unsettled": 0,
+            "cached_input_tokens": "110208",
+            "cache_write_tokens": "0"
+          },
+          "stages": [
+            {
+              "stage": "IMPLEMENT",
+              "requests": 8,
+              "input_tokens": "159422",
+              "output_tokens": "3700"
+            },
+            {
+              "stage": "REVIEW",
+              "requests": 3,
+              "input_tokens": "28954",
+              "output_tokens": "1622"
+            }
+          ],
+          "reuse_steps": [
+            {
+              "label": "复用规划源码观察",
+              "detail": "按内容哈希验证规划阶段读取的源码，直接交给实现阶段，不重复扫描。"
+            },
+            {
+              "label": "已恢复构建会话",
+              "detail": "恢复 20 条活动上下文、40 条操作记录；发现 0 个变化文件。保留已完成任务，不重新初始化项目。"
+            }
+          ],
+          "tools": [
+            {
+              "tool_name": "browser_check",
+              "calls": 2
+            },
+            {
+              "tool_name": "get_tasks",
+              "calls": 1
+            },
+            {
+              "tool_name": "read_file",
+              "calls": 9
+            },
+            {
+              "tool_name": "run_shell",
+              "calls": 2
+            },
+            {
+              "tool_name": "runtime_check",
+              "calls": 1
+            },
+            {
+              "tool_name": "update_task",
+              "calls": 1
+            }
+          ]
+        }
+      ],
+      "session_state": {
+        "completed": true,
+        "compactions": 1,
+        "prunes": 3,
+        "pruned_tokens": 31894,
+        "local_read_hits": 0,
+        "output_chars_saved": 1047
+      },
+      "session": {
+        "available": true,
+        "completed": true,
+        "messages": 43,
+        "compactions": 1,
+        "local_read_hits": 0,
+        "prunes": 3,
+        "pruned_tokens": 31894,
+        "output_chars_saved": 1047,
+        "estimated_context_tokens": 28775,
+        "known_files": 31,
+        "updated_at": 1791010630.1254835
+      }
+    }
+  ],
+  "independent_checks": {
+    "cli_unittest": 65,
+    "web_agent_vitest": 20,
+    "web_playwright_values": [
+      0,
+      2,
+      2,
+      1,
+      0
+    ]
+  },
+  "limitations": [
+    "Prior baseline includes failed/stopped jobs: not a controlled A/B saving percentage",
+    "Context estimate and locally pruned token count are not provider billing measurements",
+    "Provider cache discount is recorded; platform input price still follows model_list"
+  ],
+  "automated_tests_passed": 51,
+  "frontend_build": "passed",
+  "deployment": {
+    "backend": "healthy",
+    "agent_service": "healthy",
+    "health_database": "connected",
+    "no_running_jobs_at_restart": true,
+    "no_reserved_billing_requests_at_restart": true,
+    "session_survives_service_restart": true,
+    "worker_image": "sha256:35e8210af7a5b83a9ea69bb555b34e71c8b5ac3ccbeacec1853d9a2497946556",
+    "post_deployment_cli_source_file_count": 10
+  }
+}

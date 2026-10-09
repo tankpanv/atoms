@@ -1,0 +1,115 @@
+[
+  {
+    "id": "website-architect",
+    "skill": "website-architect",
+    "version": "1.0.0",
+    "name": "网站设计与全栈开发专家",
+    "author": "筑境",
+    "category": "技术工程",
+    "avatar": "/agents/4.webp",
+    "description": "从你的想法出发，制定高级网站视觉方案，设计前后端架构并拆分任务，完成真实功能与浏览器验收。",
+    "tags": [
+      "网站设计",
+      "前后端架构",
+      "完整交付"
+    ],
+    "capabilities": [
+      "围绕品牌与参考图建立视觉方向、排版和响应式设计系统",
+      "按需求选择前端或全栈架构，规划组件、API 和数据库",
+      "拆解任务依赖，实现交互、持久化与错误状态",
+      "构建并通过浏览器核对布局与完整业务流程"
+    ],
+    "prompts": [
+      "为一家精品咖啡馆设计高级质感的网站，展示品牌、菜单、门店和联系方式。",
+      "搭建一个有真实数据库的预约管理网站，包含预约创建、列表、取消和后台管理，先设计架构再逐项实现。",
+      "参考我上传的图片，为创意工作室制作响应式作品集网站，保持高级排版与克制的动效。"
+    ],
+    "examples": [
+      {
+        "id": "atelier",
+        "title": "ATELIER · 精品咖啡网站",
+        "description": "暖色排版、响应式导航、菜单分类和门店信息。点击预览交互式设计参考。",
+        "file": "atelier.html",
+        "color": "coffee"
+      },
+      {
+        "id": "studio",
+        "title": "Studio · 设计工作室",
+        "description": "编辑式布局、作品筛选与清晰的服务信息。",
+        "file": "studio.html",
+        "color": "studio"
+      }
+    ],
+    "updated_at": "2026-10-03T06:35:00+08:00"
+  },
+  {
+    "id": "interface-designer",
+    "skill": "interface-designer",
+    "version": "1.0.0",
+    "name": "UI 设计师",
+    "author": "像素君",
+    "category": "产品设计",
+    "avatar": "/agents/3.webp",
+    "description": "设计清晰、优雅的界面和可复用组件系统，落实响应式布局、交互状态与无障碍体验。",
+    "tags": [
+      "UI设计",
+      "组件库",
+      "界面规范"
+    ],
+    "capabilities": [
+      "建立排版、配色、间距与组件规范",
+      "实现加载、空、失败与成功等交互状态",
+      "优化桌面和移动端布局及键盘操作"
+    ],
+    "prompts": [
+      "为产品搭建完整的设计规范系统。",
+      "设计一个美观易用的响应式工作室首页。",
+      "评审现有 UI 设计，实施具体的布局与组件优化。"
+    ],
+    "examples": [
+      {
+        "id": "studio",
+        "title": "Studio · 设计系统与作品集",
+        "description": "探索编辑式布局、作品筛选和响应式组件。",
+        "file": "studio.html",
+        "color": "studio"
+      }
+    ],
+    "updated_at": "2026-10-03T06:35:00+08:00"
+  },
+  {
+    "id": "backend-architect",
+    "skill": "backend-architect",
+    "version": "1.0.0",
+    "name": "后端架构师",
+    "author": "构衡",
+    "category": "技术工程",
+    "avatar": "/agents/5.webp",
+    "description": "实现真实 API、数据库与权限控制，设计清晰的服务边界，打通前端到持久化的完整业务流程。",
+    "tags": [
+      "数据库",
+      "API设计",
+      "权限控制"
+    ],
+    "capabilities": [
+      "按业务设计数据表、约束与迁移",
+      "实现 API 输入校验、事务和幂等",
+      "打通前后端并验证刷新后的持久化与权限"
+    ],
+    "prompts": [
+      "为预约系统设计数据库与 API，完成创建、查询和取消预约的完整链路。",
+      "为现有应用增加真实用户登录与个人数据隔离。",
+      "分析并解决订单重复提交和余额扣费的一致性问题。"
+    ],
+    "examples": [
+      {
+        "id": "architecture",
+        "title": "预约管理 · 架构设计示例",
+        "description": "查看数据模型、API 和事务约束的示例方案。此案例展示架构，不代表已接入你的数据库。",
+        "file": "architecture.html",
+        "color": "architecture"
+      }
+    ],
+    "updated_at": "2026-10-03T06:35:00+08:00"
+  }
+]

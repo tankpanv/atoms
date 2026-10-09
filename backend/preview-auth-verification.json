@@ -1,0 +1,118 @@
+{
+  "project_id": "a701b74d87b34c46a61362e188c16fe4",
+  "date": "2026-10-04",
+  "root_cause": "Opaque-origin preview CORS preflight omitted X-Session-Token; authenticated browser requests blocked before reaching healthy backend/PostgreSQL.",
+  "deployed_image": "sha256:eccb0514efe455f2c4724e0d3b10beefa63cdd64faf928fe121e1b4817a295d2",
+  "playwright_mcp": {
+    "registration": 201,
+    "authenticated_library_words": 30,
+    "statistics_total": 30,
+    "refresh_preserves_login": true,
+    "logout": true,
+    "console_errors": [],
+    "request_failures": [],
+    "api_responses": [
+      {
+        "endpoint": "auth/register",
+        "status": 201,
+        "method": "POST"
+      },
+      {
+        "endpoint": "words",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "study/next",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "stats",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "stats",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "study/next",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "words",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "auth/me",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "auth/me",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "words",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "stats",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "stats",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "study/next",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "words",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "study/next",
+        "status": 200,
+        "method": "GET"
+      },
+      {
+        "endpoint": "auth/logout",
+        "status": 204,
+        "method": "POST"
+      }
+    ]
+  },
+  "earlier_real_checks": {
+    "word_creation_status": 201,
+    "review_status": 200,
+    "review_stage": 3,
+    "relogin": true,
+    "invalid_password": "邮箱或密码不正确"
+  },
+  "regressions": {
+    "image_suite_total": 108,
+    "passed": 106,
+    "skipped_postgresql_integration": 2,
+    "bootstrap_contracts_passed": 4,
+    "real_chromium_custom_header_preflight": true,
+    "real_chromium_blocked_preflight_rejected": true
+  },
+  "routing": {
+    "wrong_worker_credential": 403,
+    "running_runtime_registration": 200,
+    "sandbox_preserved": true
+  },
+  "diagnostic_data_cleanup": true
+}

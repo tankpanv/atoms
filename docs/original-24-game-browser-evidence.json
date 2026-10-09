@@ -1,0 +1,100 @@
+{
+  "exit_code": 0,
+  "title": "24 点游戏",
+  "text": "24 点游戏\n\n用四张牌的数字各一次，算出 24\n\n2\n3\n10\n2\n你的算式\n检查\n\n输入算式后点击“检查”，这里会显示判定结果。\n\n换一题\n看答案\n参考答案\n\n点击“看答案”查看一组合法算式。\n\n玩法说明\n使用四张牌上的数字各恰好一次，可以任意调换顺序。\n只允许 + - × ÷ 四则运算与括号，允许分数（例如 8/(3-8/3)）。\n让算式的结果正好等于 24 即获胜。\n\n第 2 局 · 四张牌 2、3、10、2（每一局都保证有解）",
+  "controls": [
+    {
+      "tag": "input",
+      "text": "",
+      "id": "expression-input",
+      "testid": "expression-input",
+      "placeholder": "例如 (3+3)*(5-1)",
+      "type": "text",
+      "disabled": false
+    },
+    {
+      "tag": "button",
+      "text": "检查",
+      "id": "",
+      "testid": "submit-button",
+      "placeholder": null,
+      "type": "submit",
+      "disabled": false
+    },
+    {
+      "tag": "button",
+      "text": "换一题",
+      "id": "",
+      "testid": "new-game-button",
+      "placeholder": null,
+      "type": "button",
+      "disabled": false
+    },
+    {
+      "tag": "button",
+      "text": "看答案",
+      "id": "",
+      "testid": "answer-button",
+      "placeholder": null,
+      "type": "button",
+      "disabled": false
+    }
+  ],
+  "rendered_elements": 4,
+  "actions_completed": [
+    {
+      "action": "click",
+      "selector": "[data-testid=\"answer-button\"]"
+    },
+    {
+      "action": "fill_from_text",
+      "selector": "[data-testid=\"expression-input\"]",
+      "source_selector": "[data-testid=\"answer-text\"]"
+    },
+    {
+      "action": "click",
+      "selector": "[data-testid=\"submit-button\"]"
+    },
+    {
+      "action": "assert_text",
+      "selector": "[data-testid=\"result-message\"]",
+      "value": "正确"
+    },
+    {
+      "action": "fill",
+      "selector": "[data-testid=\"expression-input\"]",
+      "value": "24"
+    },
+    {
+      "action": "click",
+      "selector": "[data-testid=\"submit-button\"]"
+    },
+    {
+      "action": "assert_text",
+      "selector": "[data-testid=\"result-message\"]",
+      "value": "四个数字"
+    },
+    {
+      "action": "click",
+      "selector": "[data-testid=\"new-game-button\"]"
+    },
+    {
+      "action": "assert_value",
+      "selector": "[data-testid=\"expression-input\"]",
+      "value": ""
+    },
+    {
+      "action": "assert_text",
+      "selector": "[data-testid=\"answer-text\"]",
+      "value": "点击"
+    },
+    {
+      "action": "assert_count",
+      "selector": "[data-testid=\"cards\"] .card",
+      "value": "4"
+    }
+  ],
+  "errors": [],
+  "failed_responses": [],
+  "screenshot": ".atoms/screenshots/76b1ca614b804d448a13c6e603735138.png"
+}

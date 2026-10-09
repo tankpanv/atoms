@@ -1,0 +1,65 @@
+{
+  "verified_at": "2026-10-02 21:34:13.053576+00:00",
+  "test_account_only": true,
+  "payment_mode": "simulation",
+  "credits_per_usd": 5,
+  "model_usage_source": "actual upstream usage",
+  "account": {
+    "credits": "374.65316950",
+    "reserved_credits": "0E-8",
+    "plan": "Pro"
+  },
+  "ledger": {
+    "balance": "374.65316950",
+    "entries": 49
+  },
+  "usage": {
+    "calls": 46,
+    "input_tokens": "628626",
+    "output_tokens": "13007",
+    "model_usd": "0.069366100000",
+    "charged_credits": "0.34683050"
+  },
+  "first_real_request": {
+    "model": "openai/gpt-6-luna",
+    "stage": "UNDERSTAND",
+    "generation_id": "gen-1790976095-VizZWC7mc1ysdHeyUY9Y",
+    "prompt_tokens": 1159,
+    "completion_tokens": 1490,
+    "input_price": "0.10000000",
+    "output_price": "0.50000000",
+    "cost_usd": "0.000860900000",
+    "charged_credits": "0.00430450"
+  },
+  "orders": [
+    {
+      "kind": "topup",
+      "plan": "",
+      "amount_usd": "2.00000000",
+      "credits": "10.00000000",
+      "status": "paid"
+    },
+    {
+      "kind": "topup",
+      "plan": "",
+      "amount_usd": "10.00000000",
+      "credits": "50.00000000",
+      "status": "failed"
+    },
+    {
+      "kind": "topup",
+      "plan": "",
+      "amount_usd": "10.00000000",
+      "credits": "50.00000000",
+      "status": "cancelled"
+    },
+    {
+      "kind": "subscription",
+      "plan": "Pro",
+      "amount_usd": "70.00000000",
+      "credits": "350.00000000",
+      "status": "paid"
+    }
+  ],
+  "automated_regression_tests_passed": 21
+}

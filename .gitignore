@@ -1,0 +1,20 @@
+.env
+backend/.auth_private.pem
+node_modules/
+frontend/node_modules/
+dist/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+reference-network.txt
+.playwright-mcp/
+
+# Local credentials, screenshots, deployment state and backups must not reach GitHub.
+.env.*
+!.env.example
+.atoms_account
+.claude-images/
+.deploy/
+.backups/
+*.pem
+subrepo/

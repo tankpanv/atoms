@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-06",
+  "project_id": "f70ceb36-e7c8-4668-8e29-c6458c9d451a",
+  "root_cause": [
+    "Browser option disabled skipped JavaScript startup and accepted only HTML/API requests",
+    "Plain HTTP does not expose crypto.randomUUID; initial React render crashed",
+    "localhost browser fixtures were secure contexts and could conceal deployment incompatibility"
+  ],
+  "changes": [
+    "Mandatory actual JavaScript startup, mounted content and runtime errors gate before HTTP/API acceptance",
+    "Interaction-tool selection still respected",
+    "Ordinary HTTP browser fixture origin with narrow Vite allowed-host binding",
+    "Startup policy version invalidates old HTTP-only verification caches",
+    "Secure UUID v4 helper added to template and existing project client/upload identities"
+  ],
+  "verification": {
+    "worker_scope": {
+      "tests": 75,
+      "skipped": 1,
+      "passed": true,
+      "log": "/tmp/atoms-javascript-startup-image.log"
+    },
+    "runtime_binding_scope": {
+      "tests": 9,
+      "skipped": 1,
+      "passed": true,
+      "log": "/tmp/atoms-javascript-startup-release.log"
+    },
+    "immutable_fullstack": {
+      "passed": true,
+      "log": "/tmp/atoms-javascript-startup-immutable-fullstack.log",
+      "checks": [
+        "Real Vite/FastAPI build and startup",
+        "Browser create/reload persistence",
+        "Real restart/readback/final delivery on ordinary HTTP origin"
+      ]
+    },
+    "existing_project": {
+      "build_passed": true,
+      "saved_version": 2,
+      "actual_preview_gateway_mounted": true,
+      "secure_context": false,
+      "random_uuid": "undefined",
+      "page_errors": [],
+      "log": "/tmp/atoms-stylemate-uuid-authoritative-browser.log"
+    },
+    "immutable_source_matches": {
+      "agent.py": "5f3c465030b61bda597b64c99ee252f9071f6c8a0bc44eb0668aa73463909fe9",
+      "agent_checks.py": "920f4ea222939c021852aef7d39f652dac1faf762125224d326d8dc3892ca8ad",
+      "agent_harness.py": "0039b8c7322c30ba56a532b99baf19654942f2463bcf391b119651e8a0cfb1b7",
+      "build_tools.py": "f6acad80e6021fd93000685e41dcfe27a9051db22227e34a48226ab7a2a3f937",
+      "runtime.py": "1e6b2e44efcee96961aacad755aaf37f2661c5f7fb1c0a14be25b94bda45ed65",
+      "templates/web-v1/frontend/src/lib/id.ts": "440d9f6c8762d18e556274814767c2dec684929459659f9415a05cf8753aaa83",
+      "templates/web-v1/docs/AGENT_GUIDE.md": "765b5bc634de2ad3a17a77ac4698e19749ee37e2ac05844b86a147fa8fb6f9fe",
+      "tests/test_project_runtime.py": "282e776c5624112a6cc05451443ad7f200d68a34eb02c8bc7abb19d83a72cd67",
+      "tests/test_build_tools.py": "d2bce065226ebb695af80c8c39060e1c769c80c32404b7551141118ae8f51b7c"
+    }
+  },
+  "deployment": {
+    "image": "sha256:75043ef1b42e4b02f844040305c4635e5bb57c4955e0bbac82e0472fbee63790",
+    "rollback_image": "sha256:ac093fd6ee2d42fb553f6cc4149903b3ced932178ea2bff6b7deab610d46175b",
+    "active_tag": "atoms-demo-backend:latest",
+    "activation": "New/continued jobs use updated worker; existing project source repaired and saved as version 2"
+  },
+  "limits": [
+    "Startup check proves JavaScript execution and mount, not full business acceptance",
+    "Business AI generation still requires actual provider configuration and successful system-contract evidence"
+  ]
+}

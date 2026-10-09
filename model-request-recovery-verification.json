@@ -1,0 +1,21 @@
+{
+  "verified_at": "2026-10-04T07:17:00.881196+00:00",
+  "project_id": "a701b74d87b34c46a61362e188c16fe4",
+  "backend_image": "sha256:6bf6dd60a88161b941beec4a7fbfe4dcbac46290e97b61270af059225705d05b",
+  "focused_tests": 35,
+  "deployed_tests": 16,
+  "image_bootstrap_tests": 4,
+  "image_regression_tests": 61,
+  "image_database_tests_skipped_without_credentials": 2,
+  "project_requests_settled": 55,
+  "upstream_usage_queried": "real generation API",
+  "retry_max_attempts": 3,
+  "pending_same_id_wait_seconds": [
+    15,
+    30
+  ],
+  "historical_billing_corrections": 4,
+  "correction_source": "real provider token usage; append-only audit ledger",
+  "source_and_session_preserved": true,
+  "customer_job_automatically_restarted": false
+}

@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-04",
+  "defaults": {
+    "source_token_limit": "AGENT_MAX_TOKENS (effective configured value)",
+    "source_iteration_limit": "AGENT_MAX_ITERATIONS (effective configured value before complexity adaptation)",
+    "formula": "max(1, configured_limit // 2)",
+    "repair_tokens": 7500000,
+    "repair_calls_or_iterations": 60
+  },
+  "counts_include": [
+    "repair iterations",
+    "all successful model calls in stabilization, including compaction and delivery-scene generation",
+    "provider token usage, billed normally"
+  ],
+  "stop_behavior": "Preserve source, conversations and requirements, mark job STOPPED, do not auto-enqueue, and do not claim demo ready without actual acceptance. User continuation starts a fresh allowance.",
+  "request_admission": "Reserve estimated input tokens and clamp output tokens to remaining allowance. Stop subsequent calls when measured usage reaches allowance.",
+  "tests": {
+    "passed": 64,
+    "seconds": 44.578,
+    "coverage": [
+      "independent token/call/iteration boundaries",
+      "repeated read loop is bounded",
+      "checkpoint retained without false completion",
+      "insufficient request context allowance blocks request",
+      "normal task allowance and repair allowance remain separate",
+      "manual stop",
+      "normal successful delivery beyond primary allowance",
+      "tool recovery and persistent sessions",
+      "half of original configured limits, odd-number floor and minimum 1; adaptive task limit does not reduce configured delivery allowance"
+    ]
+  },
+  "frontend_build": "passed",
+  "image": "sha256:45b2f8034ce55067d3579f43d07f06d137f9b2ebd973e901f173844702b9d29d"
+}

@@ -1,0 +1,8 @@
+"""Shared tool policies used by schemas, normalization, and execution."""
+SHELL_TIMEOUT_DEFAULT = 90
+SHELL_TIMEOUT_MAX = 180
+READ_LIMIT_MAX = 12000
+READ_BATCH_MAX = 16
+READ_BATCH_CHARS_MAX = 60000
+WRITE_BATCH_MAX = 12
+BROWSER_ACTIONS_MAX = 40

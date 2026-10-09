@@ -1,0 +1,91 @@
+{
+  "project_id": "3bb73a02-e2f8-44e2-8e17-a5ac8dfc862a",
+  "method": "Read-only replay of original failed calls; no original commands or writes repeated; real filesystem and shell execution regression",
+  "replays": [
+    {
+      "step_id": 6848,
+      "tool": "write_files",
+      "validation": "accepted",
+      "adjustments": [],
+      "file_count": 4
+    },
+    {
+      "step_id": 6923,
+      "tool": "write_file",
+      "validation": "MISSING_ARGUMENT",
+      "detail": "缺少必填字段 arguments.path；请明确提供，不能猜测文件路径",
+      "recovery": "明确提供 path 和完整字符串 content；不能推断缺失路径。已有文件局部修改可使用 replace_in_file。"
+    },
+    {
+      "step_id": 6978,
+      "tool": "run_shell",
+      "validation": "accepted",
+      "adjustments": [
+        {
+          "field": "timeout",
+          "requested": 300,
+          "effective": 180
+        }
+      ],
+      "effective_timeout": 180
+    },
+    {
+      "step_id": 7122,
+      "tool": "run_shell",
+      "validation": "accepted",
+      "adjustments": [
+        {
+          "field": "timeout",
+          "requested": 300,
+          "effective": 180
+        }
+      ],
+      "effective_timeout": 180
+    }
+  ],
+  "frontend_build": "passed",
+  "targeted_tests_passed": 49,
+  "live_verification": {
+    "id": "7a71d372-35e9-40ac-b8e5-590f04095c09",
+    "status": "done",
+    "state": "COMPLETE",
+    "error": "",
+    "billing": {
+      "requests": 14,
+      "unsettled": 0
+    },
+    "steps": [
+      {
+        "label": "批量编写代码",
+        "tool_name": "write_files",
+        "output": "已写入 helper.py (394 字符)\n已写入 greet.py (296 字符)\n已写入 test_greet.py (1021 字符)\n已写入 README.md (794 字符)"
+      },
+      {
+        "label": "更新任务进度",
+        "tool_name": "update_task",
+        "output": "工具错误: 完成任务必须关联实际执行成功的验证 ID（V1 等），不能只写已完成"
+      },
+      {
+        "label": "更新任务进度",
+        "tool_name": "update_task",
+        "output": "工具错误: 完成任务必须关联实际执行成功的验证 ID（V1 等），不能只写已完成"
+      },
+      {
+        "label": "项目未配置自动测试",
+        "tool_name": "",
+        "output": ""
+      },
+      {
+        "label": "代码复核通过",
+        "tool_name": "",
+        "output": ""
+      }
+    ]
+  },
+  "initial_resume_error": "checkpoint_due uninitialized on first plaintext response; regression corrected",
+  "deployment": {
+    "worker_image": "sha256:4826bbb33008a5e37e5e540acf3cfb9439d2d86db077c8e4dc5848b0e623cd7c",
+    "resume_job": "926e691c-53a4-49e8-8816-10b062a36cbb",
+    "original_build_status": "resumed; full application acceptance still pending"
+  }
+}

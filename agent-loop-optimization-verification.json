@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-06",
+  "problem_run": "2a6000bd-907e-46e0-9912-346c47f96937",
+  "observed": {
+    "test_stage_entries": 38,
+    "cached_build_reuses": 36,
+    "plan_recovery_model_minutes": 9.4,
+    "implementation_model_minutes": 7.6,
+    "compaction_model_minutes": 4.4
+  },
+  "changes": [
+    "Recovery diagnosis no longer schedules full acceptance",
+    "Cached browser evidence no longer schedules full acceptance",
+    "Only done/deferred task transitions schedule acceptance",
+    "Planning synthesis capped at one repair call with compact output budget",
+    "Only the final done/deferred task transition schedules whole-project acceptance"
+  ],
+  "target_image": "sha256:87920c3da9b08b4d9d68bf2971fb9df2c5930435f5a1f3f80fabe38f0bd06e66",
+  "active_tag": "atoms-demo-backend:latest",
+  "rollback_tag": "atoms-demo-backend:before-loop-optimization-v2",
+  "targeted_tests": {
+    "agent_delivery": "3 passed",
+    "planning_efficiency": "2 passed"
+  },
+  "docs": "docs/HARNESS_PRODUCTION_OPTIMIZATION.md"
+}

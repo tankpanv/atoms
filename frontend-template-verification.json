@@ -1,0 +1,74 @@
+{
+  "template_version": "2026.10.04.2",
+  "reference": ".claude-images/conv-20261004-124621-fd5c5a/FRONTEND_DESIGH_README.md",
+  "reference_sha256": "68df1b90d2a3e37f65a56e368d4d37e98730143b86b32581a713b91907b1d262",
+  "frontend_stack": [
+    "React",
+    "TypeScript",
+    "Vite",
+    "shadcn/ui",
+    "Tailwind CSS 3.4"
+  ],
+  "preinstalled_ui_modules": 48,
+  "design_sections": [
+    "Direction & Layout",
+    "Tokens",
+    "Shared Patterns & States",
+    "Media"
+  ],
+  "image": "sha256:67437e76ba2552c1de9607acc5d1a96a09447210a7179f561b2936c77ae37b8f",
+  "tests": {
+    "image_gates": {
+      "bootstrap": 4,
+      "delivery_and_templates": 55,
+      "result": "passed"
+    },
+    "regression": {
+      "cases": 34,
+      "skipped": 1,
+      "result": "passed"
+    },
+    "real_cached_template_build_before_install": "passed",
+    "clean_npm_ci_without_force_or_legacy_peer_deps": "passed"
+  },
+  "playwright_mcp": {
+    "live_subpath": {
+      "dialog": true,
+      "keyboard_close": true,
+      "calendar": true,
+      "tailwind": true,
+      "api": true,
+      "reload": true
+    },
+    "standalone_production": {
+      "dialog": true,
+      "keyboard_close": true,
+      "calendar": true,
+      "tailwind": true,
+      "api": true,
+      "reload": true
+    },
+    "static_publish_subpath": {
+      "dialog": true,
+      "keyboard_close": true,
+      "calendar": true,
+      "tailwind": true,
+      "reload": true,
+      "scope": "Built assets served by a local HTTP host with the same injected base element used by platform publishing; not a MinIO upload test"
+    },
+    "javascript_errors": 0
+  },
+  "fixes": [
+    "Complete segmented guide handoff without truncation",
+    "Exclude full component library from initial model context",
+    "Hash large dependency lockfiles in bounded chunks without model read limits",
+    "Copy root and nested workspace dependencies into independent tenant caches",
+    "Preserve router basename for live preview and injected base for static publishing"
+  ],
+  "deployment": {
+    "backend": "running",
+    "agent_service": "running",
+    "cache_matches_manifests_and_lock": true,
+    "nested_workspace_cache_present": true
+  }
+}

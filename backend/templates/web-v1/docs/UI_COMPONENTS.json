@@ -1,0 +1,199 @@
+{
+  "template_version": "2026.10.04.4",
+  "installed_using": "shadcn@2.3.0",
+  "official_registry": "https://ui.shadcn.com/r/styles/new-york/",
+  "files": [
+    {
+      "path": "frontend/src/components/ui/accordion.tsx",
+      "sha256": "6277d92a4c7360ea131ceeab912b41a0ef7ce2527a4f3be31cd2d6f5ccbc261b"
+    },
+    {
+      "path": "frontend/src/components/ui/alert-dialog.tsx",
+      "sha256": "311bede35f785d7b1ecd7398986757e26409d1049352a94ccf83586b8603c92d"
+    },
+    {
+      "path": "frontend/src/components/ui/alert.tsx",
+      "sha256": "5950ac01377e7eedc94b00eb3fee678745e4cc1a72b5343867f0733d07db6660"
+    },
+    {
+      "path": "frontend/src/components/ui/aspect-ratio.tsx",
+      "sha256": "08b0aa0b05efc573c7d63363c03e83d4b101bfeb54140764e96ddea30659cfcc"
+    },
+    {
+      "path": "frontend/src/components/ui/avatar.tsx",
+      "sha256": "e78b35ed76c67d8ff50603fbe0dfa4fe600097bd860d89e65beea3e16683dad8"
+    },
+    {
+      "path": "frontend/src/components/ui/badge.tsx",
+      "sha256": "dab689d836ad3292b41e7f4986b4e68e5d45c6903e4aeaae8972a82d4aebec29"
+    },
+    {
+      "path": "frontend/src/components/ui/breadcrumb.tsx",
+      "sha256": "90038fcc92d28b1a35e12489af680c3345c1ced841e929e977a2094a87412da3"
+    },
+    {
+      "path": "frontend/src/components/ui/button.tsx",
+      "sha256": "c2b999a96781e6c932632bd089095368e973bf5602e1b1a62156b7d2b43f1e84"
+    },
+    {
+      "path": "frontend/src/components/ui/calendar.tsx",
+      "sha256": "f0387132022865b5432de253d1a9187fd30386c1f32e98d2445e5f2382bcf22f"
+    },
+    {
+      "path": "frontend/src/components/ui/card.tsx",
+      "sha256": "525c4bb2c051987be64df0e92e1d90174912b219bf541e24ffbc4a3406de49e8"
+    },
+    {
+      "path": "frontend/src/components/ui/carousel.tsx",
+      "sha256": "73de327daa2826ddb4875def8ac63c65984fd0903f9a68fe6c5b9d3061b1a2cd"
+    },
+    {
+      "path": "frontend/src/components/ui/chart.tsx",
+      "sha256": "2d7c4634b85fbd0bbe0c4636d0d333e02398fa49ad70fd24eece5853dc3975cc"
+    },
+    {
+      "path": "frontend/src/components/ui/checkbox.tsx",
+      "sha256": "4f3e710233f3bc628f74441a2e4a2681968d5dfb028d146c0051deb74241c7a5"
+    },
+    {
+      "path": "frontend/src/components/ui/collapsible.tsx",
+      "sha256": "f4cdd104de29928bfcd40b865c7d08eed9157a537fbb8b5e6d0921f02b63cc04"
+    },
+    {
+      "path": "frontend/src/components/ui/command.tsx",
+      "sha256": "517d703624212591f1a99b20f35f6a75b99691eb2d234126cae34af27c2ac01e"
+    },
+    {
+      "path": "frontend/src/components/ui/context-menu.tsx",
+      "sha256": "a5a99fdcce3817fccd0aae60059e25eaf7339a542db4279617cc5612c21113c3"
+    },
+    {
+      "path": "frontend/src/components/ui/dialog.tsx",
+      "sha256": "15d3736b5975ff3d9d186e3d41a2b33503a3804e962c4fa109d1a70f3aec5da7"
+    },
+    {
+      "path": "frontend/src/components/ui/drawer.tsx",
+      "sha256": "774316527ddc577fc54012a0c898ebcf7cf8f11152126e550828b53004a5b70c"
+    },
+    {
+      "path": "frontend/src/components/ui/dropdown-menu.tsx",
+      "sha256": "dd56bb4a77ca50bfb34b45875899f5a11f090199ee255e49c8eab9be0e6df125"
+    },
+    {
+      "path": "frontend/src/components/ui/form.tsx",
+      "sha256": "7514a59057759a26fb9ad5d3ff76cdcd83b9eb87e66218c88ecf36967f3e9ece"
+    },
+    {
+      "path": "frontend/src/components/ui/hover-card.tsx",
+      "sha256": "dcb793b8b1202b1634d791a993acadca0cfc3043a93b98c91a627fbff794f384"
+    },
+    {
+      "path": "frontend/src/components/ui/input-otp.tsx",
+      "sha256": "6f01689c89df620da51fcdd7552df1a5aeb34b282820aa31d031ea72a5a9c062"
+    },
+    {
+      "path": "frontend/src/components/ui/input.tsx",
+      "sha256": "6299a6a387dc55e528aec4342deaea0b83f1ea3a365c135a31a18ee55334f441"
+    },
+    {
+      "path": "frontend/src/components/ui/label.tsx",
+      "sha256": "e69cfc27d78c9ef31b248ab8ea4fa54327c1038843f70efb5cd85d54c0bf1e0e"
+    },
+    {
+      "path": "frontend/src/components/ui/menubar.tsx",
+      "sha256": "fc0dd88ed2f0a0c855319a0515435853e06cd0f5035e456c2ad36df2e6177cb5"
+    },
+    {
+      "path": "frontend/src/components/ui/navigation-menu.tsx",
+      "sha256": "f575e5b33d09dec5c88958cb1359a9cfb14d99f3a153d6bc2ac1e2834089cef5"
+    },
+    {
+      "path": "frontend/src/components/ui/pagination.tsx",
+      "sha256": "4fc7744e8a488effd907d2f80c0d9ed5cc88de42427553d8315d028f08f3a586"
+    },
+    {
+      "path": "frontend/src/components/ui/popover.tsx",
+      "sha256": "04cf38bf94abd3fe1b51e90227e6e235ca74776f6fc6af718bfc149e7424f582"
+    },
+    {
+      "path": "frontend/src/components/ui/progress.tsx",
+      "sha256": "6b3b4b69a1cb361076174892e9a96e1a09020307616965ef89f2f7e2495b57a9"
+    },
+    {
+      "path": "frontend/src/components/ui/radio-group.tsx",
+      "sha256": "f2f0220d43453c83241aa6a74900311631496156289d8974c1590b5691470c4e"
+    },
+    {
+      "path": "frontend/src/components/ui/resizable.tsx",
+      "sha256": "43298b8c4de27bd800157a1692f5149b9978a66f09b8ad2e8f98d7cd73c6a775"
+    },
+    {
+      "path": "frontend/src/components/ui/scroll-area.tsx",
+      "sha256": "d7d02600effca55d0dcadce8c09c97ebddda3a19c5fa1d52dc9f6f727b26c6b1"
+    },
+    {
+      "path": "frontend/src/components/ui/select.tsx",
+      "sha256": "0dc58daed168b0efeeb4290f76dc54aec6ac6279eca234a8ac8a18e3ebb13e5c"
+    },
+    {
+      "path": "frontend/src/components/ui/separator.tsx",
+      "sha256": "c956c4cca4b8442fa9314d6079b9f975e1ee39d5804aaf2966990f6258ac342a"
+    },
+    {
+      "path": "frontend/src/components/ui/sheet.tsx",
+      "sha256": "cead5c060431776f90df1418768fb45beaccfc50059700157d2ca02aef9c40d4"
+    },
+    {
+      "path": "frontend/src/components/ui/sidebar.tsx",
+      "sha256": "817d14d62ac4d4abdcc4330b7d6e3dda1c511b16ebc8fa1126ec4001460fcf28"
+    },
+    {
+      "path": "frontend/src/components/ui/skeleton.tsx",
+      "sha256": "87608e7cc815ad3d88e0b9de6c402bb37b58ea1b38636cf69709da1baff6e334"
+    },
+    {
+      "path": "frontend/src/components/ui/slider.tsx",
+      "sha256": "234e38fef59169bd02d8f5b56ca02e5ec13a0bd6846c328927b924e1299f7fb0"
+    },
+    {
+      "path": "frontend/src/components/ui/sonner.tsx",
+      "sha256": "771ab8637d27384c3ed030ba3be01a07b90c791c294eae06646250f8e81bc49e"
+    },
+    {
+      "path": "frontend/src/components/ui/switch.tsx",
+      "sha256": "ba5867cd3145af1290edd80bb56d4b6d61c6331aa8ef96ae0b85487f4499feaf"
+    },
+    {
+      "path": "frontend/src/components/ui/table.tsx",
+      "sha256": "a4a6972c2d47d465d7f02c1dc4a6cbfeda7a97e46479c1b0cebdaf26bf9b497a"
+    },
+    {
+      "path": "frontend/src/components/ui/tabs.tsx",
+      "sha256": "6f74706bc6b53f9e4bcebb5e7ab8743b616aef181edc7758b8ee905f9b2fdcd7"
+    },
+    {
+      "path": "frontend/src/components/ui/textarea.tsx",
+      "sha256": "ec7c92aaed80f6923a7caa4bfe4eead395b50a7001504fd7fbb0b9381804dae9"
+    },
+    {
+      "path": "frontend/src/components/ui/toast.tsx",
+      "sha256": "9ad16de3d78e14a7556cadd6a53e1dd565751424f0bd537e0ad5884daa2c5386"
+    },
+    {
+      "path": "frontend/src/components/ui/toaster.tsx",
+      "sha256": "1348f1a1f9820e2f1394b93cecc156a7e22f03636ab9270753985549aae2be74"
+    },
+    {
+      "path": "frontend/src/components/ui/toggle-group.tsx",
+      "sha256": "11592e3f7673ef518e2f82b939dc4752fe5ef7953f487f35595931c3d16fc37d"
+    },
+    {
+      "path": "frontend/src/components/ui/toggle.tsx",
+      "sha256": "fb6061098e0368d9119905d6ed3c5ed2704b75078c4ad2c71b16b29f98a42ace"
+    },
+    {
+      "path": "frontend/src/components/ui/tooltip.tsx",
+      "sha256": "ce6afa34fb9dae51053a863b4c3f7c6e55f3da23b00149f31a8e4402bc963be0"
+    }
+  ]
+}

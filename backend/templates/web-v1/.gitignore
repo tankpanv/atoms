@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.python-packages/
+.atoms-data/
+.env
+__pycache__/
+.pytest_cache/
+.npm-cache/

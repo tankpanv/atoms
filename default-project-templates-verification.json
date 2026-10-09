@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-04",
+  "template_version": "2026.10.04.1",
+  "deployed_image": "sha256:b0dfe626c36214889bd6388caae0ac7496a50ac5ed9b71507f5291f6e3162820",
+  "worker_release_checks": {
+    "bootstrap_tests": 4,
+    "harness_and_template_tests": 54,
+    "passed": true
+  },
+  "additional_regression": {
+    "tests": 34,
+    "skipped": 1,
+    "passed": true
+  },
+  "live_model": {
+    "model": "deepseek/deepseek-v4.1-flash",
+    "tasks_done": 2,
+    "tasks_total": 2,
+    "business_test_frontend": 5,
+    "business_test_backend": 6,
+    "pipeline_returned_preview": true,
+    "calls": 14,
+    "tokens": 222535,
+    "elapsed_seconds": 420.56,
+    "handoff_verification": "runtime_and_rendering",
+    "note": "Model scenario generation used the checked-preview fallback. Independent production Playwright MCP assertions below verify actual business interactions."
+  },
+  "production_playwright": {
+    "blank_required_fields": true,
+    "submit_real_message": true,
+    "inputs_cleared": true,
+    "reload_persistence": true,
+    "container_restart_persistence": true,
+    "another_visitor_sees_same_message": true,
+    "api_rejects_blank_status": 400,
+    "uncaught_javascript_errors": 0,
+    "passed": true
+  },
+  "deployment": {
+    "web_nginx": true,
+    "fullstack_fastapi": true,
+    "sqlite_persistent_volume": true,
+    "non_root_source_ownership": true,
+    "health_endpoint": 200
+  },
+  "cache": {
+    "present_in_deployed_worker_image": true,
+    "exact_lock_manifest_fingerprint": true,
+    "per_project_independent_copy": true
+  },
+  "customer_jobs_interrupted": 0,
+  "initial_diagnostic_findings": [
+    "Vitest default process pool exceeded isolated project resource limits; bounded thread pool executes normally.",
+    "Testing Library requires afterEach cleanup; baseline now includes it.",
+    "Private workspace permissions require explicit production COPY ownership.",
+    "Docker build default network could not reach dependency registries in this host; configurable host build network and locked base images are provided."
+  ]
+}

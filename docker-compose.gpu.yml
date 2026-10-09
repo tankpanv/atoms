@@ -1,0 +1,10 @@
+# Optional: only loaded by deploy.sh when VISION_GPU=true.
+services:
+  vision:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

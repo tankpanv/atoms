@@ -1,0 +1,76 @@
+{
+  "policy": "hypothesis-driven recovery; scoped implementation unit checks; final real-runtime acceptance",
+  "project_id": "dd26f618-4905-4e97-869a-ba11740a87c1",
+  "inspected_job": "ab4b40d0-2834-4199-88cc-925f00ed0bf9",
+  "deployed_worker_image": "sha256:05613be6fde4dd69cc44cb3dfd4dcba552ed63a1d2cacff1c080744126fade15",
+  "worker_activation": "new queued/continued jobs upgrade obsolete worker; existing preview preserved",
+  "source_hashes": {
+    "agent.py": "16b7ba1044cf7bbe1032d5f3a4285df3dfcd75176aaaaf1a3fd1c8326ba5ad18",
+    "agent_checks.py": "5e01fd62964b669e7ca38d7132f1031290fcace9a1c1c2b33fcb8df0bc179323",
+    "agent_recovery.py": "6c9a98df4c38b89a01ce9c2b973a0192df76ca456c5e6feb99f7fa4d4f93f2b1",
+    "execution_guard.py": "f9d8a80920cde97e27ad38eb791b52441b1659ec21d5355999ec042588238f54",
+    "verification_policy.py": "fa6997092320a8ee1a41f182439787ce1ea2cf0b40f00cbc9e80f76bbc386bb5",
+    "jobs.py": "0f9ff2df4a1fb164fbcdf6426decd28698a3a645f103e60d77fce23b05ca7013",
+    "agent_harness.py": "dc7d6efa07c545968f912ac1f2178fe8d77fdc90b26d855a60a6820463bc6cba"
+  },
+  "observed_problems": [
+    "completion evidence gaps incorrectly treated as fatal failure counts",
+    "expected successful 422 checks misdiagnosed as unexpected business errors",
+    "incorrect PORT/API_PORT assumption in old recovery diagnosis",
+    "real harness builds had no requirement receipts",
+    "form strings JSON-encoded by HTTP check tool"
+  ],
+  "recovery": {
+    "failure_count_stop": false,
+    "scene_failure_count_stop": false,
+    "stagnation_count_stop": false,
+    "lenses": [
+      "evidence and verification contract",
+      "backward causal trace",
+      "minimal discriminating experiment",
+      "lifecycle and invariants"
+    ],
+    "diagnosis": "at least two competing hypotheses with real probes and support/refutation conditions; actual outcomes carried into following diagnoses",
+    "identical_failed_tool_calls": "reuse failure after two executions; different successful real probe allows one retry; identical source reads do not unlock",
+    "termination": "overall time/token/model-call resource budget or explicit user stop; preserve sources, evidence and recovery context"
+  },
+  "unit_tests": {
+    "create_update_run": "allowed during implementation, scoped to current change",
+    "final_overall_suite": false,
+    "unit_receipts_as_requirement_acceptance": false
+  },
+  "verification": {
+    "full_executor_regression": {
+      "run": 223,
+      "skipped": 4,
+      "result": "passed"
+    },
+    "release_recovery_and_tool_regression": {
+      "run": 52,
+      "result": "passed"
+    },
+    "real_encoding_checks": {
+      "result": "passed",
+      "chain": [
+        "expected JSON-to-form 422 correctly counted as passed negative case",
+        "real raw URL-encoded form",
+        "real form object encoding",
+        "real multipart project file upload",
+        "actual service restart"
+      ]
+    },
+    "real_final_delivery": {
+      "run": 1,
+      "result": "passed",
+      "chain": [
+        "actual frontend build",
+        "actual frontend and API startup",
+        "real browser record creation",
+        "reload readback",
+        "service restart and persistence readback",
+        "final delivery restart and core browser acceptance"
+      ]
+    }
+  },
+  "existing_project_job": "stopped checkpoint preserved; no billable model job automatically restarted"
+}

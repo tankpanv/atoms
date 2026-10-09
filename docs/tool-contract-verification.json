@@ -1,0 +1,151 @@
+{
+  "method": "Read-only replay of actual recorded model arguments through new contract; no original tool effects replayed",
+  "calls": [
+    {
+      "billing_request_id": "78a7a085-29ac-4fcb-9690-e58ca2cbaa82",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 12000,
+        "max_tokens": 12000
+      },
+      "classification": "OUTPUT_TRUNCATED",
+      "detail": "输出 tokens 已达到请求上限，工具 JSON 不完整，未执行。Unterminated string starting at: line 1 column 5214 (char 5213)",
+      "executed": false
+    },
+    {
+      "billing_request_id": "47d86a15-f63a-43a3-aff8-bda31564f2b7",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 3314,
+        "max_tokens": 12000
+      },
+      "classification": "INVALID_ARGUMENTS",
+      "detail": "arguments.files 数量超出允许范围",
+      "executed": false
+    },
+    {
+      "billing_request_id": "e88e1452-0f48-41d8-815f-b6d2c34bc085",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 12000,
+        "max_tokens": 12000
+      },
+      "classification": "OUTPUT_TRUNCATED",
+      "detail": "响应用满输出上限且参数不符合合同，未执行。缺少必填字段 arguments.files；请明确提供，不能猜测文件路径",
+      "executed": false
+    },
+    {
+      "billing_request_id": "8dd5d3e9-6e59-430f-bf25-fc0ebcf35113",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 4047,
+        "max_tokens": 12000
+      },
+      "classification": "valid",
+      "file_count": 1
+    },
+    {
+      "billing_request_id": "4edffe1c-261a-4907-adf2-48c7c50c8769",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 7376,
+        "max_tokens": 12000
+      },
+      "classification": "MISSING_ARGUMENT",
+      "detail": "缺少必填字段 arguments.files[2].path；请明确提供，不能猜测文件路径",
+      "executed": false
+    },
+    {
+      "billing_request_id": "4eb48acd-12df-401b-8098-88b66a654763",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 11688,
+        "max_tokens": 12000
+      },
+      "classification": "INVALID_ARGUMENTS",
+      "detail": "arguments.files 数量超出允许范围",
+      "executed": false
+    },
+    {
+      "billing_request_id": "33b54aff-85b4-4c70-bbe8-5926bd064940",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 9401,
+        "max_tokens": 12000
+      },
+      "classification": "INVALID_ARGUMENTS",
+      "detail": "arguments.files 数量超出允许范围",
+      "executed": false
+    },
+    {
+      "billing_request_id": "702aa6e4-081e-4661-af9b-bc13e5908828",
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "completion_tokens": 7903,
+        "max_tokens": 12000
+      },
+      "classification": "INVALID_ARGUMENTS",
+      "detail": "arguments.files 数量超出允许范围",
+      "executed": false
+    }
+  ],
+  "project_id": "a4cac944-d3e9-435c-8ef3-431e23c7ad6d",
+  "original_job": "e94fb5ce-f40c-4d82-86cb-1f8b7e5fa586",
+  "resumed_job": "47f0bce2-2c89-4b5b-b135-0ae6a4ddb1c4",
+  "targeted_tests_passed": 43,
+  "live_verification": {
+    "verification_project": "bfc26492-c2bf-4cfc-8195-c1487cb2cae0",
+    "verification_job": {
+      "id": "771a316c-5b93-4e1a-9790-413a7e36e125",
+      "status": "done",
+      "state": "COMPLETE",
+      "error": "",
+      "billing": {
+        "requests": 18,
+        "input_tokens": "90395",
+        "output_tokens": "6014",
+        "unsettled": 0
+      },
+      "steps": [
+        {
+          "label": "批量编写代码",
+          "tool_name": "write_files",
+          "tool_output": "已写入 greet.py (495 字符)\n已写入 test_greet.py (1235 字符)\n已写入 README.md (340 字符)"
+        },
+        {
+          "label": "批量编写代码",
+          "tool_name": "write_files",
+          "tool_output": "已写入 .atoms-workspace.json (188 字符)"
+        },
+        {
+          "label": "测试 通过：python -m unittest -v test_greet",
+          "tool_name": "run_shell",
+          "tool_output": "test_cli_with_name_prints_hello_name (test_greet.GreetCliTest.test_cli_with_name_prints_hello_name) ... ok\ntest_cli_without_arguments_prints_hello_world (test_greet.GreetCliTest.test_cli_without_arguments_prints_hello_world) ... ok\ntest_name_returns_hello_name (test_greet.GreetFunctionTest.test_name_returns_hello_name) ... ok\ntest_no_name_returns_hello_world (test_greet.GreetFunctionTest.test_no_name_returns_hello_world) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.032s\n\nOK\n"
+        },
+        {
+          "label": "测试 通过：python -m unittest -v test_greet",
+          "tool_name": "run_shell",
+          "tool_output": "test_cli_with_name_prints_hello_name (test_greet.GreetCliTest.test_cli_with_name_prints_hello_name) ... ok\ntest_cli_without_arguments_prints_hello_world (test_greet.GreetCliTest.test_cli_without_arguments_prints_hello_world) ... ok\ntest_name_returns_hello_name (test_greet.GreetFunctionTest.test_name_returns_hello_name) ... ok\ntest_no_name_returns_hello_world (test_greet.GreetFunctionTest.test_no_name_returns_hello_world) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.030s\n\nOK\n"
+        },
+        {
+          "label": "代码复核通过",
+          "tool_name": "",
+          "tool_output": ""
+        }
+      ],
+      "errors": []
+    },
+    "original_project_resume": {
+      "id": "47f0bce2-2c89-4b5b-b135-0ae6a4ddb1c4",
+      "status": "running",
+      "state": "IMPLEMENT",
+      "error": "",
+      "steps": [
+        {
+          "label": "已恢复构建会话",
+          "detail": "恢复 27 条活动上下文、40 条操作记录；发现 0 个变化文件。保留已完成任务，不重新初始化项目。"
+        }
+      ]
+    }
+  }
+}
