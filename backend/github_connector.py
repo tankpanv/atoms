@@ -229,93 +229,92 @@ class ImportRequest(BaseModel):
 async def import_repository(data: ImportRequest, user=Depends(current_user)):
     token = await access_token(user['id'])
     owner, name = data.full_name.split('/')
-    archive_bytes = bytearray()
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=15), follow_redirects=True) as client:
-        repository = await client.get(f'{API}/repos/{owner}/{name}', headers={**HEADERS, 'Authorization': 'Bearer ' + token})
-        if repository.status_code == 404:
-            raise HTTPException(404, '仓库不存在或当前 GitHub 授权无权访问')
-        if repository.status_code in (401, 403):
-            raise HTTPException(403, '当前 GitHub 授权无法读取该仓库')
-        repository.raise_for_status()
-        if repository.json().get('id') != data.repository_id or repository.json().get('default_branch') != data.default_branch:
-            raise HTTPException(409, '仓库信息已变化，请刷新仓库列表后重试')
-        async with client.stream('GET', f'{API}/repos/{owner}/{name}/zipball/{urllib.parse.quote(data.default_branch, safe="")}', headers={**HEADERS, 'Authorization': 'Bearer ' + token}) as response:
-            if response.status_code == 404:
-                raise HTTPException(404, '仓库不存在或当前 GitHub 授权无权访问')
-            if response.status_code in (401, 403):
-                raise HTTPException(403, '当前 GitHub 授权无法下载该仓库')
-            response.raise_for_status()
-            if int(response.headers.get('content-length', '0') or 0) > 50 * 1024 * 1024:
-                raise HTTPException(413, '仓库压缩包超过 50 MB')
-            async for chunk in response.aiter_bytes():
-                archive_bytes.extend(chunk)
-                if len(archive_bytes) > 50 * 1024 * 1024:
-                    raise HTTPException(413, '仓库压缩包超过 50 MB')
-    project_id = uuid.uuid4()
-    workspace_relative = f'projects/{project_id.hex}'
-    storage = Path(os.getenv('WORKSPACE_ROOT', '/workspaces')).resolve()
-    storage.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.github-import-', dir=storage))
-    extracted = staging / 'repo'
-    extracted.mkdir()
-    root = storage / workspace_relative
+    archive_bytes = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
     try:
-        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-            members = archive.infolist()
-            if len(members) > 10000:
-                raise ValueError('too many repository files')
-            total = 0
-            prefix = None
-            for member in members:
-                parts = Path(member.filename).parts
-                if not parts:
-                    continue
-                prefix = prefix or parts[0]
-                if parts[0] != prefix or '..' in parts or member.filename.startswith('/') or stat.S_ISLNK(member.external_attr >> 16):
-                    raise ValueError('unsafe path in archive')
-                relative = Path(*parts[1:])
-                if not relative.parts:
-                    continue
-                target = (extracted / relative).resolve()
-                if not target.is_relative_to(extracted.resolve()):
-                    raise ValueError('unsafe archive path')
-                if member.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
-                else:
-                    total += member.file_size
-                    if total > 200 * 1024 * 1024:
-                        raise ValueError('expanded repository is too large')
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with archive.open(member) as source, target.open('wb') as output:
-                        shutil.copyfileobj(source, output)
-        if (extracted / '.atoms').exists():
-            shutil.rmtree(extracted / '.atoms')
-        title = data.full_name.split('/')[-1][:120]
-        prompt = f'Imported from GitHub repository {data.full_name}'
-        from agent import ensure_workspace, set_workspace_owner, project_uid
-        ensure_workspace(project_id, user['id'], title=title, prompt=prompt)
-        for item in extracted.iterdir():
-            destination = root / item.name
-            if destination.exists():
-                raise ValueError('repository conflicts with project metadata')
-            item.rename(destination)
-        set_workspace_owner(root, project_uid(project_id))
-        with connection() as conn:
-            conn.execute("""INSERT INTO projects(id,owner_id,title,prompt,kind,mode,model,status,preview_html,workspace_path)
-                VALUES(%s,%s,%s,%s,'Web','Build','openai/gpt-6-luna','ready','',%s)""", (project_id,user['id'],title,prompt,workspace_relative))
-            conn.execute("""INSERT INTO github_project_repositories(project_id,user_id,repository_id,full_name,html_url,default_branch)
-                VALUES(%s,%s,%s,%s,%s,%s)""",(project_id,user['id'],data.repository_id,data.full_name,f'https://github.com/{data.full_name}',data.default_branch))
-            from main import grant_project_role
-            grant_project_role(conn,project_id)
-        return {'project_id': str(project_id), 'repository': data.full_name, 'imported_files': sum(1 for path in root.rglob('*') if path.is_file())}
-    except (zipfile.BadZipFile, ValueError, OSError) as exc:
-        shutil.rmtree(root, ignore_errors=True)
-        raise HTTPException(422, 'GitHub 仓库压缩包无效或超出导入限制') from exc
-    except Exception:
-        shutil.rmtree(root, ignore_errors=True)
-        raise
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=15), follow_redirects=True) as client:
+            repository = await client.get(f'{API}/repos/{owner}/{name}', headers={**HEADERS, 'Authorization': 'Bearer ' + token})
+            if repository.status_code == 404:
+                raise HTTPException(404, '仓库不存在或当前 GitHub 授权无权访问')
+            if repository.status_code in (401, 403):
+                raise HTTPException(403, '当前 GitHub 授权无法读取该仓库')
+            repository.raise_for_status()
+            if repository.json().get('id') != data.repository_id or repository.json().get('default_branch') != data.default_branch:
+                raise HTTPException(409, '仓库信息已变化，请刷新仓库列表后重试')
+            async with client.stream('GET', f'{API}/repos/{owner}/{name}/zipball/{urllib.parse.quote(data.default_branch, safe="")}', headers={**HEADERS, 'Authorization': 'Bearer ' + token}) as response:
+                if response.status_code == 404:
+                    raise HTTPException(404, '仓库不存在或当前 GitHub 授权无权访问')
+                if response.status_code in (401, 403):
+                    raise HTTPException(403, '当前 GitHub 授权无法下载该仓库')
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    archive_bytes.write(chunk)
+        project_id = uuid.uuid4()
+        workspace_relative = f'projects/{project_id.hex}'
+        storage = Path(os.getenv('WORKSPACE_ROOT', '/workspaces')).resolve()
+        storage.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix='.github-import-', dir=storage))
+        extracted = staging / 'repo'
+        extracted.mkdir()
+        root = storage / workspace_relative
+        try:
+            with zipfile.ZipFile(archive_bytes) as archive:
+                members = archive.infolist()
+                total = 0
+                prefix = None
+                for member in members:
+                    parts = Path(member.filename).parts
+                    if not parts:
+                        continue
+                    prefix = prefix or parts[0]
+                    if parts[0] != prefix or '..' in parts or member.filename.startswith('/') or stat.S_ISLNK(member.external_attr >> 16):
+                        raise ValueError('unsafe path in archive')
+                    relative = Path(*parts[1:])
+                    if not relative.parts:
+                        continue
+                    from agent import SKIP_DIRS
+                    if relative.parts[0] in SKIP_DIRS or relative.parts[0] == '.atoms':
+                        continue
+                    target = (extracted / relative).resolve()
+                    if not target.is_relative_to(extracted.resolve()):
+                        raise ValueError('unsafe archive path')
+                    if member.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        total += member.file_size
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(member) as source, target.open('wb') as output:
+                            shutil.copyfileobj(source, output)
+            if (extracted / '.atoms').exists():
+                shutil.rmtree(extracted / '.atoms')
+            title = data.full_name.split('/')[-1][:120]
+            prompt = f'Imported from GitHub repository {data.full_name}'
+            from agent import ensure_workspace, set_workspace_owner, project_uid
+            ensure_workspace(project_id, user['id'], title=title, prompt=prompt)
+            for item in extracted.iterdir():
+                destination = root / item.name
+                if destination.exists():
+                    raise ValueError('repository conflicts with project metadata')
+                item.rename(destination)
+            set_workspace_owner(root, project_uid(project_id))
+            with connection() as conn:
+                conn.execute("""INSERT INTO projects(id,owner_id,title,prompt,kind,mode,model,status,preview_html,workspace_path)
+                    VALUES(%s,%s,%s,%s,'Web','Build','openai/gpt-6-luna','ready','',%s)""", (project_id,user['id'],title,prompt,workspace_relative))
+                conn.execute("""INSERT INTO github_project_repositories(project_id,user_id,repository_id,full_name,html_url,default_branch)
+                    VALUES(%s,%s,%s,%s,%s,%s)""",(project_id,user['id'],data.repository_id,data.full_name,f'https://github.com/{data.full_name}',data.default_branch))
+                from main import grant_project_role
+                grant_project_role(conn,project_id)
+            return {'project_id': str(project_id), 'repository': data.full_name, 'imported_files': sum(1 for path in root.rglob('*') if path.is_file())}
+        except (zipfile.BadZipFile, ValueError, OSError) as exc:
+            shutil.rmtree(root, ignore_errors=True)
+            raise HTTPException(422, 'GitHub 仓库导入失败：'+str(exc)[:300]) from exc
+        except Exception:
+            shutil.rmtree(root, ignore_errors=True)
+            raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        archive_bytes.close()
 
 
 @router.get('/linked-projects')
@@ -332,20 +331,18 @@ async def push_project(project_id: uuid.UUID, user=Depends(current_user)):
         linked=conn.execute('SELECT * FROM github_project_repositories WHERE project_id=%s AND user_id=%s',(project_id,user['id'])).fetchone()
     if not project or not linked: raise HTTPException(404,'项目尚未关联 GitHub 仓库')
     if project['status'] in ('queued','running'): raise HTTPException(409,'项目构建运行时不能同步，请稍后重试')
-    from agent import project_root
+    from agent import project_root, SKIP_DIRS
     root=project_root(project_id,user['id']).resolve()
-    excluded={'node_modules','dist','build','.git','.venv','.python-packages','.python-cache','__pycache__','.atoms','.atoms-attachments','published','coverage','.next','.vite','vendor'}
-    files=[];total=0
+    excluded=SKIP_DIRS | {'build','.atoms','.next','.vite','vendor'}
+    files=[]
     for directory, folders, names in os.walk(root, followlinks=False):
         folders[:] = [name for name in folders if name not in excluded and not (Path(directory)/name).is_symlink()]
         for name in names:
             path=Path(directory)/name
             if path.is_symlink() or not path.is_file(): continue
             rel=path.relative_to(root)
-            if rel.name in {'.env','env.connector'} or rel.name.startswith('.env.') or rel.name in {'.npmrc','.pypirc','id_rsa','id_ed25519'} or rel.suffix.lower() in {'.pem','.key','.p12','.pfx'}: continue
-            size=path.stat().st_size;total+=size
-            if len(files)>=200 or total>25*1024*1024: raise HTTPException(413,'单次 GitHub 同步最多 200 个文件或 25 MB，请先缩小变更')
-            files.append((rel.as_posix(),path.read_bytes()))
+            if rel.name in {'.env','env.connector'} or rel.name.startswith(('.env.', '.atoms-upload-')) or rel.name in {'.npmrc','.pypirc','id_rsa','id_ed25519'} or rel.suffix.lower() in {'.pem','.key','.p12','.pfx'}: continue
+            files.append((rel.as_posix(),path))
     if not files: raise HTTPException(422,'项目中没有可同步的源文件')
     owner,name=linked['full_name'].split('/')
     headers={**HEADERS,'Authorization':'Bearer '+token}
@@ -359,12 +356,17 @@ async def push_project(project_id: uuid.UUID, user=Depends(current_user)):
         parent=ref['object']['sha']
         commit=await request('GET',f'/repos/{owner}/{name}/git/commits/{parent}')
         semaphore=asyncio.Semaphore(4)
-        async def create_blob(path,content):
+        async def create_blob(path,source):
             async with semaphore:
+                content = await asyncio.to_thread(source.read_bytes)
                 return await request('POST',f'/repos/{owner}/{name}/git/blobs',json={'content':base64.b64encode(content).decode(),'encoding':'base64'})
-        blobs=await asyncio.gather(*(create_blob(path,content) for path,content in files))
-        entries=[{'path':path,'mode':'100755' if (root/path).stat().st_mode & 0o111 else '100644','type':'blob','sha':blob['sha']} for (path,_),blob in zip(files,blobs)]
-        tree=await request('POST',f'/repos/{owner}/{name}/git/trees',json={'base_tree':commit['tree']['sha'],'tree':entries})
-        new_commit=await request('POST',f'/repos/{owner}/{name}/git/commits',json={'message':f'Update from Atoms: {project["title"]}','tree':tree['sha'],'parents':[parent]})
+        tree_sha = commit['tree']['sha']
+        for start in range(0, len(files), 100):
+            batch = files[start:start+100]
+            blobs=await asyncio.gather(*(create_blob(path,source) for path,source in batch))
+            entries=[{'path':path,'mode':'100755' if source.stat().st_mode & 0o111 else '100644','type':'blob','sha':blob['sha']} for (path,source),blob in zip(batch,blobs)]
+            tree=await request('POST',f'/repos/{owner}/{name}/git/trees',json={'base_tree':tree_sha,'tree':entries})
+            tree_sha = tree['sha']
+        new_commit=await request('POST',f'/repos/{owner}/{name}/git/commits',json={'message':f'Update from Atoms: {project["title"]}','tree':tree_sha,'parents':[parent]})
         await request('PATCH',f'/repos/{owner}/{name}/git/refs/heads/{urllib.parse.quote(linked["default_branch"],safe="")}',json={'sha':new_commit['sha'],'force':False})
     return {'repository':linked['full_name'],'branch':linked['default_branch'],'commit':new_commit['sha'],'url':new_commit['html_url'],'files':len(files)}

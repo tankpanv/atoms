@@ -61,8 +61,22 @@ class ExecutableContractTests(unittest.TestCase):
             root = Path(temporary); plan = default_plan()
             self.assertTrue(conformance_issues(root, plan, {'src/main.tsx':'app'}))
             plan['architecture']['frontend']['directory'] = '.'
-            self.assertTrue(conformance_issues(root, plan, {'src/main.tsx':'app'}))
+            self.assertEqual(conformance_issues(root, plan, {'src/main.tsx':'app'}), [])
             self.assertEqual(conformance_issues(root, plan, {'src/main.tsx':'entry', 'src/domain.ts':'logic'}), [])
+
+    def test_source_directory_and_project_directory_both_match_without_moving_business(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = default_plan()
+            for directory, source in [('src', 'src/App.tsx'), ('.', 'src/App.tsx'),
+                                      ('./src', 'src/App.tsx'), ('frontend', 'frontend/src/App.tsx'),
+                                      ('frontend/src', 'frontend/src/App.tsx'), ('web', 'web/src/App.tsx')]:
+                with self.subTest(directory=directory):
+                    plan['architecture']['frontend']['directory'] = directory
+                    self.assertEqual(conformance_issues(root, plan, {source: 'existing app'}), [])
+            plan['architecture']['frontend']['directory'] = 'frontend'
+            issues = conformance_issues(root, plan, {'src/App.tsx': 'existing app'})
+            self.assertIn('src/App.tsx', issues[0])
 
 
 class GuardTests(unittest.TestCase):
@@ -157,7 +171,7 @@ class RealExecutionTests(unittest.IsolatedAsyncioTestCase):
                 if state == AgentState.PLAN:
                     diagnoses.append(messages)
                     return {'content':json.dumps({'layer':'command','root_cause':'missing_runner is not installed; this is a runner error, not broken Python business code','next_actions':['Run python greet.py and associate R1 evidence']})}
-                if not sequence:raise AssertionError('Recovery loop did not complete')
+                if not sequence:raise AssertionError(json.dumps(messages[-4:], ensure_ascii=False))
                 return sequence.pop(0)
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)/uuid.uuid4().hex;root.mkdir()

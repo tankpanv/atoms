@@ -61,6 +61,15 @@ def local_path(path: str) -> str:
     return path
 
 
+def project_relative_path(runtime, path):
+    """Accept the current runtime URL returned by tools without doubling it."""
+    prefix = getattr(runtime, 'prefix', '')
+    path_part = urlsplit(path).path
+    if prefix and (path_part == prefix or path_part.startswith(prefix + '/')):
+        return '/' + path[len(prefix):].lstrip('/')
+    return path
+
+
 def contains_json(actual, expected) -> bool:
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(key in actual and contains_json(actual[key], value) for key, value in expected.items())
@@ -70,10 +79,10 @@ def contains_json(actual, expected) -> bool:
 
 
 async def http_request(project_id: uuid.UUID, args: dict):
-    runtime = await start_runtime(project_id)
+    runtime = await start_runtime(project_id, args.get('configured_command', ''))
     if runtime is None:
         raise ValueError("项目未配置可运行服务")
-    path = local_path(args.get("path", "/"))
+    path = project_relative_path(runtime, local_path(args.get("path", "/")))
     service_name = args.get("service", "")
     if service_name:
         service = next((item for item in runtime.services if item.name == service_name), None)
@@ -100,12 +109,8 @@ async def http_request(project_id: uuid.UUID, args: dict):
             from agent import ensure_workspace, safe_file
             root = ensure_workspace(project_id)
             files = []
-            total = 0
             for upload in uploads:
                 file = safe_file(root, upload['path'])
-                total += file.stat().st_size
-                if total > 25 * 1024 * 1024:
-                    raise ValueError('实际上传文件总大小超过 25 MB')
                 files.append((upload['field'], (file.name, opened.enter_context(file.open('rb')),
                               upload.get('content_type') or mimetypes.guess_type(file.name)[0] or 'application/octet-stream')))
             payload['files'] = files
@@ -153,7 +158,8 @@ async def http_request(project_id: uuid.UUID, args: dict):
 
 async def browser_preview_url(project_id, runtime, path):
     # Accept a path copied from runtime_check without duplicating its prefix.
-    target = path if runtime.base_aware and (path == runtime.prefix or path.startswith(runtime.prefix + '/')) else upstream_path(runtime, path.lstrip('/'))
+    path = project_relative_path(runtime, path)
+    target = upstream_path(runtime, path.lstrip('/'))
     # localhost is a secure context even over HTTP. Use an ordinary HTTP
     # origin so fixture checks expose the same API limits as LAN deployment.
     url = f"http://atoms-preview.test:{runtime.port}{target}"
@@ -175,7 +181,7 @@ async def browser_preview_url(project_id, runtime, path):
 async def browser_check(project_id: uuid.UUID, root, args: dict):
     from playwright.async_api import async_playwright
 
-    runtime = await start_runtime(project_id)
+    runtime = await start_runtime(project_id, args.get('configured_command', ''))
     if runtime is None:
         raise ValueError("项目未配置浏览器开发服务")
     path = local_path(args.get("path", "/"))

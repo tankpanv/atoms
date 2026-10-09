@@ -90,15 +90,20 @@ def conformance_issues(root, plan, files):
     if plan.get('application_type') != 'web':
         return []
     front = plan['architecture']['frontend']
-    directory = front['directory'].strip('/')
+    directory = Path(front['directory']).as_posix().strip('/')
     prefix = '' if directory in ('', '.') else directory + '/'
     issues = []
-    modules = [n for n in files if n.startswith(prefix+'src/') and n.endswith(('.tsx','.ts','.jsx','.js','.vue','.svelte'))
+    # Plans may describe either the application root or its source directory.
+    # In particular directory=src with src/App.tsx must never mean src/src.
+    source_prefixes = (prefix,) if Path(directory).name == 'src' else (prefix+'src/', prefix+'app/', prefix+'pages/')
+    modules = [n for n in files if n.startswith(source_prefixes) and n.endswith(('.tsx','.ts','.jsx','.js','.vue','.svelte'))
                and '/components/ui/' not in n and not n.endswith(('.test.ts','.test.tsx','.spec.ts','.d.ts'))]
     if files and not modules and any('/src/' in '/'+n for n in files):
-        issues.append(f'计划前端目录 {front["directory"]} 与实际业务代码位置不一致。先定位入口和配置，修正集成路径；不要重建已有业务。')
-    if modules and not any(Path(n).name not in ('main.tsx','main.jsx','App.tsx','App.jsx','main.ts','main.js') for n in modules):
-        issues.append('业务全部集中在入口/App；按计划提取领域逻辑、持久化和页面/交互组件，入口只负责挂载/组合。保留已有功能，不靠创建空模块满足检查。')
+        actual = sorted(n for n in files if '/src/' in '/'+n and n.endswith(('.tsx','.jsx','.vue','.svelte')))[:6]
+        issues.append(f'计划前端目录 {front["directory"]} 未找到源码，实际入口候选：{", ".join(actual)}。'
+                      '先核对 package.json、index.html 和实际启动/构建配置；保持已有业务，避免仅为计划文字搬移目录。')
+    # Number of modules is a design preference, not functional acceptance.
+    # Refactoring an already working small App here caused needless repair loops.
     manifest = root / '.atoms/template.json'
     if manifest.exists():
         package = root / 'frontend/package.json'

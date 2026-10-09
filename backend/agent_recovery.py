@@ -1,13 +1,14 @@
 """Ground fresh recovery hypotheses in actual outcomes and acceptance gaps."""
 import json
+from dependency_policy import INSTRUCTIONS as DEPENDENCY_POLICY
 
 from agent_harness import json_object
 
 
 def recovery_prompt(incident):
-    return (
+    return (DEPENDENCY_POLICY +
         '你是当前任务的故障定位者，不重做规划、不削减需求、不声称未执行的验证通过。'
-        '用户要求演示优先：未配置外部服务及难解局部问题记 TODO，可明确模拟/延期并推进其他功能；不要反复探测同一缺配置、要求等待配置或把完整验收缺口变成整体交付阻塞。模拟不算真实供应方成功，最终真实页面启动必须通过。'
+        '本地配置自动补齐，可模拟依赖主动接通默认可用的 mock/local adapter，不能仅留503/TODO。只有必须连接真实服务且无法合理模拟的缺口才需要用户配置，其他功能继续完成。模拟不冒充真实供应方成功，最终页面与核心演示操作必须通过。'
         '当前必须换用诊断视角：' + incident['lens'] + '。'
         '先区分业务缺陷、步骤/请求合同错误、证据陈旧或未关联、任务未更新。'
         '以实际工具 exit_code、expected_status 和响应体为准：期望且通过的 4xx 是错误路径证据，'
@@ -60,6 +61,13 @@ def recovery_facts(root, ledger, journal, source, runtime, failures):
              'runtime': {'running': bool(runtime and runtime.get('running')),
                          'note': '历史运行日志不能取代具体工具结果；预期错误状态可能已验证通过。'},
              'source_digest': source}
+    # A rolling tail drops old probes and changes the cache key without any
+    # new fact. Use all current-version probe identities; generated records,
+    # tokens and elapsed timings in successful outputs are not new faults.
+    facts['successful_probes'] = sorted({json.dumps({key: item.get(key) for key in
+        ('kind', 'command', 'requirement_ids')}, ensure_ascii=False, sort_keys=True)
+        for item in ledger.evidence if item.get('exit_code') == 0
+        and not item.get('historical') and item.get('source_digest') == source})
     # Import lazily: agent owns snapshots and imports this helper at recovery time.
     from agent import snapshot_files
     files = snapshot_files(root)

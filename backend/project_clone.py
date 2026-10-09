@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 
-SKIP = {'published', '.python-packages', '.python-cache', '.local', '.atoms-attachments', '.atoms-runtime', '.agent-session', '.ruff_cache', '.mypy_cache', 'node_modules', 'dist', '.git', '.venv', 'venv', '__pycache__', '.cache', '.npm-cache', '.atoms-data', '.auth_private.pem', '.pytest_cache', '.atoms', '.agent', '.attachments', '.runtime', 'coverage', 'env.connector'}
+SKIP = {'published', '.python-packages', '.python-cache', '.atoms-snapshots', '.runtime-python-deps', '.build-tmp', '.local', '.atoms-attachments', '.atoms-runtime', '.agent-session', '.ruff_cache', '.mypy_cache', 'node_modules', 'dist', '.git', '.venv', 'venv', '__pycache__', '.cache', '.npm-cache', '.atoms-data', '.auth_private.pem', '.pytest_cache', '.atoms', '.agent', '.attachments', '.runtime', 'coverage', 'env.connector'}
 
 def copy_source(source, destination, include_build=False):
     source, destination = Path(source), Path(destination)
@@ -13,12 +13,10 @@ def copy_source(source, destination, include_build=False):
         folders[:] = [name for name in folders if (name not in SKIP or (include_build and name == 'dist')) and not (Path(directory)/name).is_symlink()]
         for name in names:
             path = Path(directory)/name
-            if path.is_symlink() or not path.is_file() or name in SKIP or name.startswith('.env'):
+            if path.is_symlink() or not path.is_file() or name in SKIP or name.startswith(('.env', '.atoms-upload-')):
                 continue
             total += path.stat().st_size
             files += 1
-            if total > 256 * 1024 * 1024 or files > 10000:
-                raise ValueError('项目源码超过克隆限制（256MB / 10000 个文件）')
             target = destination / path.relative_to(source)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)

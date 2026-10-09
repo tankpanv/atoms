@@ -40,6 +40,71 @@ def receipt(status=200, body=None, identifier='V1', source='current'):
 
 
 class SystemContractTests(unittest.TestCase):
+    def test_local_auth_and_managed_database_are_agent_setup_not_external_todos(self):
+        from system_contract import configuration_issue, defer_dependency, refresh_deferred_dependencies
+        for name in ('AUTH_TOKEN_SECRET', 'JWT_SECRET', 'SESSION_SECRET', 'SECRET_KEY', 'APP_DATABASE_URL'):
+            evidence = [receipt(503, {'detail': '未配置 ' + name})]
+            issue = configuration_issue(evidence, 'current')
+            self.assertEqual(issue['resolution'], 'auto_configure')
+            self.assertIsNone(confirmed_dependency_blocker(evidence, 'current'))
+            state = {'deferred_dependencies': [dict(issue, status='todo_configuration')]}
+            self.assertFalse(defer_dependency(state, issue))
+            refresh_deferred_dependencies(state, [], 'current')
+            self.assertEqual(state['deferred_dependencies'], [])
+
+    def test_mockable_service_is_not_external_and_successful_demo_clears_its_todo(self):
+        from system_contract import configuration_issue, defer_dependency, refresh_deferred_dependencies
+        missing = receipt(503, {'detail': '未配置 SMTP_PASSWORD'})
+        issue = configuration_issue([missing], 'current')
+        self.assertEqual(issue['resolution'], 'mock')
+        self.assertIsNone(confirmed_dependency_blocker([missing], 'current'))
+        state = {}
+        self.assertTrue(defer_dependency(state, issue))
+        demo = receipt(body={'simulated': True}, identifier='V2')
+        refresh_deferred_dependencies(state, [missing, demo], 'current')
+        self.assertEqual(state['deferred_dependencies'], [])
+        self.assertIsNone(configuration_issue([missing, demo], 'current'))
+
+    def test_explicit_mock_or_required_real_service_controls_provider_classification(self):
+        from system_contract import configuration_issue
+        plan = system_plan()
+        missing = receipt(503, {'detail': '未配置 OPENAI_BASE_URL'})
+        self.assertEqual(confirmed_dependency_blocker([missing], 'current')['required_env'], ['OPENAI_BASE_URL'])
+        dependency = plan['system_contract']['dependencies'][0]
+        dependency['required_env'].append('OPENAI_BASE_URL')
+        dependency['demo_strategy'] = 'mock'
+        self.assertIsNone(confirmed_dependency_blocker([missing], 'current', plan))
+        self.assertEqual(configuration_issue([missing], 'current', plan)['resolution'], 'mock')
+        dependency['real_service_required'] = True
+        self.assertIsNotNone(confirmed_dependency_blocker([missing], 'current', plan))
+        mixed = receipt(503, {'detail': '未配置 AUTH_TOKEN_SECRET 和 OPENAI_API_KEY'})
+        self.assertEqual(confirmed_dependency_blocker([mixed], 'current')['required_env'], ['OPENAI_API_KEY'])
+
+    def test_changing_existing_provider_plan_to_mock_clears_stale_external_todo(self):
+        from system_contract import defer_dependency, refresh_deferred_dependencies
+        missing = receipt(503, {'detail': '未配置 OPENAI_API_KEY'})
+        state = {}
+        defer_dependency(state, confirmed_dependency_blocker([missing], 'current'))
+        plan = system_plan()
+        plan['system_contract']['dependencies'][0]['demo_strategy'] = 'mock'
+        refresh_deferred_dependencies(state, [receipt(body={'simulated': True})], 'current', plan)
+        self.assertEqual(state['deferred_dependencies'], [])
+
+    def test_handoff_does_not_mislabel_local_or_mock_todos_as_external(self):
+        from system_contract import configuration_issue, delivery_todo
+        from types import SimpleNamespace
+        state = {'deferred_dependencies': [
+            configuration_issue([receipt(503, {'detail': '未配置 AUTH_TOKEN_SECRET'})], 'current'),
+            configuration_issue([receipt(503, {'detail': '未配置 SMTP_PASSWORD'})], 'current'),
+            {'kind': 'api_probe', 'detail': 'Representative API requires repair'},
+        ]}
+        ledger = SimpleNamespace(plan=system_plan(), tasks=[], completion_issues=lambda files: [])
+        with tempfile.TemporaryDirectory() as directory:
+            todo = delivery_todo(Path(directory), ledger, state, {})
+        self.assertNotIn('外部配置：', todo)
+        self.assertIn('Agent 自动', todo)
+        self.assertIn('mock/local adapter', todo)
+
     def test_external_dependency_is_deduplicated_todo_without_job_stop(self):
         from system_contract import defer_dependency
         blocker = confirmed_dependency_blocker([receipt(503, {'detail': '未配置 OPENAI_API_KEY'})], 'current')

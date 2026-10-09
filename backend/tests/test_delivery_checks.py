@@ -277,8 +277,7 @@ class SceneTests(unittest.IsolatedAsyncioTestCase):
             (root/'package.json').write_text('{"name":"large-lock"}')
             lock = root/'package-lock.json'
             lock.write_text(' ' * (MAX_FILE_BYTES + 65536) + '{}')
-            with self.assertRaisesRegex(ValueError, '文件过大'):
-                read_file(root, 'package-lock.json')
+            self.assertEqual(read_file(root, 'package-lock.json'), lock.read_text())
             async def install(*args):
                 (root/'node_modules').mkdir(exist_ok=True)
                 (root/'node_modules/.package-lock.json').write_text('{}')

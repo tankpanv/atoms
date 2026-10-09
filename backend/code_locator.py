@@ -82,23 +82,29 @@ class CodeLocator:
             conn.execute('CREATE TABLE IF NOT EXISTS source_index(path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, sha TEXT NOT NULL, data TEXT NOT NULL)')
 
     def sync(self):
-        from agent import list_files, safe_file, MAX_FILE_BYTES, MAX_SNAPSHOT_BYTES
+        from agent import list_files, safe_file, MAX_FILE_BYTES
+        from project_snapshots import file_identity
         names = list_files(self.root)
         stats = {'files': len(names), 'reindexed_files': 0, 'reused_files': 0, 'bytes_read': 0}
-        total = 0
         with self.session.connect() as conn:
             old = {row[0]: row[1:] for row in conn.execute('SELECT path,fingerprint,sha,data FROM source_index')}
             for name in names:
                 path = safe_file(self.root, name)
                 stat = path.stat()
-                total += stat.st_size
-                if total > MAX_SNAPSHOT_BYTES:
-                    raise ValueError('项目文件超过版本快照大小限制（25 MB）')
-                fingerprint = encoded([2, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino])
+                fingerprint = encoded([3, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino])
                 if name in old and old[name][0] == fingerprint:
                     sha, data = old[name][1], json.loads(old[name][2])
                     stats['reused_files'] += 1
                 else:
+                    if stat.st_size > MAX_FILE_BYTES:
+                        identity = file_identity(path)
+                        sha = identity['sha256']
+                        data = {'text': identity['text'], 'symbols': [], 'routes': [], 'tables': [], 'imports': []}
+                        stats['bytes_read'] += stat.st_size
+                        conn.execute('INSERT OR REPLACE INTO source_index VALUES(?,?,?,?)', (name, fingerprint, sha, encoded(data)))
+                        stats['reindexed_files'] += 1
+                        self.entries[name] = {'path': name, 'sha': sha, **data}
+                        continue
                     raw = path.read_bytes()
                     stats['bytes_read'] += len(raw)
                     try:
@@ -109,7 +115,7 @@ class CodeLocator:
                         data = facts(name, text)
                         data['text'] = True
                     except UnicodeError:
-                        sha = hashlib.sha256(encoded({'encoding': 'base64', 'content': base64.b64encode(raw).decode()}).encode()).hexdigest()
+                        sha = hashlib.sha256(raw).hexdigest()
                         data = {'text': False, 'symbols': [], 'routes': [], 'tables': [], 'imports': []}
                     conn.execute('INSERT OR REPLACE INTO source_index VALUES(?,?,?,?)', (name, fingerprint, sha, encoded(data)))
                     stats['reindexed_files'] += 1
@@ -234,11 +240,11 @@ class CodeLocator:
                         'truncated': truncated, 'next_offset': offset + limit if truncated else None})
 
     def read(self, args, messages):
-        from agent import safe_file, MAX_FILE_BYTES
+        from agent import safe_file
         path = args['path']
         target = safe_file(self.root, path)
-        if not target.is_file() or target.stat().st_size > MAX_FILE_BYTES:
-            raise ValueError('文件不存在或超过源码读取大小限制')
+        if not target.is_file():
+            raise ValueError('文件不存在')
         text = target.read_bytes().decode('utf-8')
         if '\x00' in text:
             raise ValueError('二进制文件不能作为源码读取')

@@ -46,7 +46,7 @@ def ensure_bucket():
             s3.head_bucket(Bucket=BUCKET)
 
 
-def upload_build(project_id: str, dist: Path) -> tuple[str, str, list[dict]]:
+def upload_build(project_id: str, dist: Path, prefix: str | None = None) -> tuple[str, str, list[dict]]:
     """Upload a complete dist tree and return bucket, prefix and object metadata."""
     ensure_bucket()
     root = dist.resolve()
@@ -54,7 +54,7 @@ def upload_build(project_id: str, dist: Path) -> tuple[str, str, list[dict]]:
     if not any(path.relative_to(root).as_posix() == "index.html" for path in files):
         raise ValueError("构建产物中缺少 index.html")
 
-    prefix = f"projects/{project_id}/published/{uuid.uuid4().hex}"
+    prefix = prefix or f"projects/{project_id}/published/{uuid.uuid4().hex}"
     objects: list[dict] = []
     s3 = client()
     for path in files:

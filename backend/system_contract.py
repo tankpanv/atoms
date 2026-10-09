@@ -1,6 +1,7 @@
 """A coherent system plan and honest, executable acceptance contract."""
 import json
 import re
+from dependency_policy import INSTRUCTIONS as DEPENDENCY_INSTRUCTIONS, LOCAL_ENV_NAMES, resolution_for, issue_resolution
 
 
 INSTRUCTIONS = '''
@@ -8,10 +9,11 @@ INSTRUCTIONS = '''
 软件计划提供 system_contract:{"version":1,"journeys":[{"id":"J1","requirement_ids":["R1"],"entry":"实际入口","steps":["实际操作→调用→状态/数据变化→结果回读"],"success_signal":"具体成功结果","failure_signals":["明确的失败/回退结果"]}],"api_contracts":[{"method":"POST","path":"/api/业务路径","request_media_type":"application/json|multipart/form-data|application/x-www-form-urlencoded","request_fields":["字段"],"success_status":200,"success_assertions":{"具体返回字段":"期望值"},"success_schema":{"type":"object","required":["outfits"],"properties":{"outfits":{"type":"array","minItems":3}}},"error_statuses":[422],"requirement_ids":["R1"],"producer":"backend/实际路由.py","consumers":["frontend/实际客户端.ts"]}],"dependencies":[{"name":"真实外部服务","requirement_ids":["R1"],"required_env":["项目服务需要的环境变量名"],"binding":"平台已提供的能力或用户配置，不能猜测存在","probe":"不泄密的真实连接/调用检查","on_unavailable":"记录配置 TODO、模拟演示适配、继续其他功能；不冒充真实服务成功"}],"invariants":["权限/并发/持久化/额度等与目标相关的不变量"],"development_order":["先验证关键依赖并打通一个真实端到端流程，再集中完成全部模块与交互状态，最后完整验收"]}。
 只设计本需求必要的系统；简单 CLI/展示页面也可用简洁 journeys，api_contracts/dependencies 无需凭空增加。
 每项明确需求必须被 journey 覆盖；接口必须确定请求编码、字段、成功结果、错误状态及真正的生产者/消费者。
-外部 AI/支付/邮件等服务不是写环境变量名就已绑定。平台项目目前注入托管数据库连接；平台代码智能体的模型凭据不会自动提供给生成的业务服务。逐项声明实际依赖和配置方法，先探测风险。缺失凭据不能阻塞整个项目：记录配置 TODO，保留真实 provider，提供明确标注 simulated:true 的演示适配器/结果并继续整体开发；预期503、健康或额度查询仍不能当真实生成成功。
+先区分项目本地配置、可模拟依赖和必须调用的真实外部服务。本地签名密钥和托管数据库由平台提供，其他本地配置由 Agent 自动补齐；可模拟依赖必须主动接通默认可用的 mock/local adapter，不得交付未配置503或仅写 TODO。必须连接真实大模型/私有服务且无法合理模拟的凭据才列外部配置。平台代码智能体的模型凭据不会注入业务服务；不伪造服务绑定或将模拟当成真实供应方成功。
 开发前核对调用方与接口合同，批量写入同一业务链路的完整模块，包含真实持久化、输入校验、认证边界、并发/幂等、超时和错误恢复（按实际需求选择），不以目录结构或文档代替实现。
 最终验收逐项检查成功路径和必要失败路径。错误路径通过只证明错误处理，不能证明成功能力；build不能代替业务验收。用户优先要求最终可启动演示：尽可能解决发现的问题；外部依赖或难解决部分可以延期/绕过，交付真实可运行的演示，并列出实现、模拟、缺失及后续配置 TODO。不因完整验收缺口停止交付，也不宣称模拟能力已通过真实服务验收。
 '''
+INSTRUCTIONS += DEPENDENCY_INSTRUCTIONS
 
 
 def validate_system_contract(plan):
@@ -76,6 +78,10 @@ def validate_system_contract(plan):
                 isinstance(name, str) and re.fullmatch(r'[A-Z][A-Z0-9_]*', name)
                 for name in dependency['required_env']):
             raise ValueError('dependency.required_env 必须是环境变量名，不含密钥值')
+        if 'demo_strategy' in dependency and dependency['demo_strategy'] not in ('auto_configure', 'mock', 'real_service'):
+            raise ValueError('dependency.demo_strategy 必须为 auto_configure/mock/real_service')
+        if 'real_service_required' in dependency and type(dependency['real_service_required']) is not bool:
+            raise ValueError('dependency.real_service_required 必须为布尔值')
     return plan
 
 
@@ -220,9 +226,10 @@ def contract_acceptance_issues(plan, evidence, source, *, strict=True):
     return issues
 
 
-def confirmed_dependency_blocker(evidence, source):
-    """Only an actual, current service response proves a configuration blocker."""
+def configuration_issue(evidence, source, plan=None):
+    """Classify actual configuration failures before choosing repair or deferral."""
     resolved = set()
+    demonstrated = set()
     for item in reversed(evidence):
         if item.get('kind') != 'http_request' or item.get('historical') or item.get('source_digest') != source:
             continue
@@ -232,6 +239,8 @@ def confirmed_dependency_blocker(evidence, source):
                     args.get('path', response.get('path', item.get('command', ''))).split('?')[0])
         if success_receipt(item):
             resolved.add(endpoint)
+        if item.get('exit_code') == 0 and isinstance(response.get('status'), int) and 200 <= response['status'] < 300:
+            demonstrated.add(endpoint)
         if endpoint in resolved:
             continue
         if response.get('status') != 503:
@@ -244,39 +253,79 @@ def confirmed_dependency_blocker(evidence, source):
                 pass
         if not isinstance(body, str) or not re.search(r'未配置|尚未配置|not configured|missing.{0,30}(?:key|credential)', body, re.I):
             continue
-        env_names = sorted(set(re.findall(r'\b(?:[A-Z][A-Z0-9_]*_API_KEY|[A-Z][A-Z0-9_]*_SECRET)\b', body)))
+        env_names = sorted(set(re.findall(r'\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b', body)))
         if not env_names:
             continue  # Do not guess from transient 503s or generic error messages.
+        resolution = resolution_for(env_names, plan)
+        if resolution != 'external_configuration' and endpoint in demonstrated:
+            continue
+        if resolution == 'external_configuration':
+            env_names = [name for name in env_names if name not in LOCAL_ENV_NAMES]
         return {'evidence_id': item['id'], 'method': endpoint[0], 'path': item.get('arguments', {}).get('path', item.get('command', '')),
                 'required_env': env_names, 'requirement_ids': item.get('requirement_ids', []),
-                'message': '实际接口响应明确缺少 ' + ', '.join(env_names), 'status': 'awaiting_configuration'}
+                'message': '实际接口响应明确缺少 ' + ', '.join(env_names),
+                'resolution': resolution, 'status': 'awaiting_configuration' if resolution == 'external_configuration' else 'needs_agent_repair'}
     return None
+
+
+def confirmed_dependency_blocker(evidence, source, plan=None):
+    issue = configuration_issue(evidence, source, plan)
+    return issue if issue and issue['resolution'] == 'external_configuration' else None
 
 
 def defer_dependency(state, blocker):
     """A confirmed missing configuration is a TODO, never a whole-job stop."""
+    resolution = issue_resolution(blocker)
+    if resolution == 'auto_configure':
+        state.pop('dependency_blocker', None)
+        return False
     pending = state.setdefault('deferred_dependencies', [])
     key = (blocker.get('method', 'GET'), blocker.get('path'), tuple(blocker.get('required_env', [])))
-    if any((d.get('method', 'GET'), d.get('path'), tuple(d.get('required_env', []))) == key for d in pending):
-        return False
-    pending.append({**blocker, 'status': 'todo_configuration', 'simulation': 'implement_explicit_demo_adapter'})
+    for previous in pending:
+        if (previous.get('method', 'GET'), previous.get('path'), tuple(previous.get('required_env', []))) == key:
+            if issue_resolution(previous) == resolution:
+                return False
+            previous.update(blocker, resolution=resolution,
+                            status='todo_configuration' if resolution == 'external_configuration' else 'todo_demo_adapter')
+            return True
+    pending.append({**blocker, 'resolution': resolution,
+                    'status': 'todo_configuration' if resolution == 'external_configuration' else 'todo_demo_adapter',
+                    'simulation': 'implement_explicit_demo_adapter'})
     state.pop('dependency_blocker', None)
     return True
 
 
-def refresh_deferred_dependencies(state, evidence, source):
+def refresh_deferred_dependencies(state, evidence, source, plan=None):
     proven = {(e.get('arguments', {}).get('method', 'GET'), e.get('arguments', {}).get('path', '').split('?')[0])
               for e in evidence if e.get('kind') == 'http_request'
               and e.get('source_digest') == source and success_receipt(e)}
-    state['deferred_dependencies'] = [d for d in state.get('deferred_dependencies', [])
-                                      if (d.get('method', 'GET'), d.get('path', '').split('?')[0]) not in proven]
+    demonstrated = {(e.get('arguments', {}).get('method', 'GET'), e.get('arguments', {}).get('path', '').split('?')[0])
+                    for e in evidence if e.get('kind') == 'http_request' and not e.get('historical')
+                    and e.get('source_digest') == source and e.get('exit_code') == 0
+                    and isinstance(receipt_response(e).get('status'), int)
+                    and 200 <= receipt_response(e)['status'] < 300}
+    def pending(d):
+        resolution = issue_resolution(d, plan)
+        if d.get('required_env') and resolution == 'auto_configure':
+            return False  # Migrate old false external-secret TODOs; runtime supplies them.
+        d['resolution'] = resolution
+        endpoint = (d.get('method', 'GET'), d.get('path', '').split('?')[0])
+        return endpoint not in (demonstrated if resolution == 'mock' else proven)
+    state['deferred_dependencies'] = [d for d in state.get('deferred_dependencies', []) if pending(d)]
 
 
 def delivery_todo(root, ledger, state, files):
     lines = ['演示交付 TODO（不代表全部真实业务已验收）']
     lines += ['- ' + note for note in state.get('delivery_limitations', [])]
     for dependency in state.get('deferred_dependencies', []):
-        lines.append('- 外部配置：' + dependency['message'] + '；配置并切换真实适配器后重新验证。')
+        resolution = issue_resolution(dependency, ledger.plan)
+        message = dependency.get('message') or dependency.get('detail') or '尚需完善业务链路'
+        if resolution == 'auto_configure':
+            lines.append('- 本地配置由 Agent 自动补齐并验证：' + message)
+        elif resolution == 'mock':
+            lines.append('- 演示适配待完善：' + message + '；由 Agent 接通可用 mock/local adapter，不要求用户配置。')
+        else:
+            lines.append('- 外部配置：' + message + '；接入真实服务时配置并重新验证。')
     for task in ledger.tasks:
         if task['status'] != 'done':
             lines.append(f"- {task['id']} {task['title']}：{task.get('note') or '尚待完善或验证'}")
@@ -303,16 +352,24 @@ def decision_frame(ledger, files, state):
     return {'system_goal': ledger.plan['goal'], 'system_contract': ledger.plan.get('system_contract'), 'current_tasks': [
         {'id': t['id'], 'status': t['status'], 'requirements': t['requirement_ids'], 'files': t['files']}
         for t in ledger.tasks], 'coverage': coverage, 'acceptance_gaps': ledger.completion_issues(files),
-        'external_blocker': confirmed_dependency_blocker(ledger.evidence, source),
+        'external_blocker': confirmed_dependency_blocker(ledger.evidence, source, ledger.plan),
+        'configuration_repair': configuration_issue(ledger.evidence, source, ledger.plan),
         'recent_decision': state.get('decision'),
         'deferred_dependencies': state.get('deferred_dependencies', []),
-        'next_action_policy': '演示优先：批量完成其他功能，外部配置缺口及难以修复部分记 TODO；可使用明确标注的模拟适配器推进真实演示流程。完成可实现的功能后用 deferred 注记未完成部分，继续依赖任务。不能把模拟当真实业务验收。不要重复配置探测或停止整个项目；最终真实构建、页面挂载及无致命运行错误必须通过。'}
+        'next_action_policy': '先自动补齐本地配置；可 mock 的服务必须接通可用演示，不能仅留503/TODO。只有必须调用真实服务且无法合理模拟的配置交给用户。模拟链路验证通过后不再当外部配置阻塞；保留模拟标记，不冒充真实供应方成功。最终构建、页面及核心演示操作必须走通。'}
 
 
 def diagnosis_fingerprint(facts):
     """Repeated receipt IDs, notes and counters are not new diagnostic facts."""
-    receipts = sorted({json.dumps({k: r.get(k) for k in ('kind', 'command', 'exit_code', 'requirement_ids', 'current_source', 'result')},
-                                  ensure_ascii=False, sort_keys=True) for r in facts['recent_receipts']})
-    failed = [{k: e.get(k) for k in ('name', 'args', 'source', 'code', 'output')} for e in facts['actual_failed_operations']]
+    from execution_guard import error_signature
+    receipts = facts.get('successful_probes')
+    if receipts is None:  # Older checkpoints/tests still have only a receipt tail.
+        receipts = sorted({json.dumps({k: r.get(k) for k in ('kind', 'command', 'exit_code', 'requirement_ids', 'current_source')}
+                            | {'result': error_signature(r.get('result', '')) if r.get('exit_code') != 0 else None},
+                            ensure_ascii=False, sort_keys=True) for r in facts['recent_receipts']})
+    failed = [{k: e.get(k) for k in ('name', 'source', 'code')}
+              | {'args': {k: v for k, v in e.get('args', {}).items() if k not in ('timeout', 'requirement_ids')},
+                 'error': error_signature(e.get('output', ''))}
+              for e in facts['actual_failed_operations']]
     return {'source': facts['source_digest'], 'gaps': facts['acceptance_gaps'],
             'tasks': [(t['id'], t['status']) for t in facts['tasks']], 'receipts': receipts, 'failed': failed}

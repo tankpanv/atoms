@@ -1,6 +1,7 @@
 """Task budgets govern scope; delivery repairs retain real billing and stop controls."""
 from dataclasses import dataclass, field
 import time
+from dependency_policy import INSTRUCTIONS as DEPENDENCY_POLICY
 
 
 def complexity(plan):
@@ -109,7 +110,35 @@ DELIVERY_INSTRUCTION = '''现在进入演示交付阶段。保留原需求和已
 Web 必须配置真实 build/dev 命令、必要后端服务，路由和资源适配 $BASE_PATH；执行器会根据真实页面生成并执行核心演示场景，也可以通过 browser_check 直接提供真实功能断言；demo 配置可选，不要为补平台元数据反复改业务代码；artifact任务必须生成用户要求的实际文件并通过正文/格式和真实预览检查，不要求软件服务或无关测试；CLI/library 必须配置可执行的真实 test/演示命令并输出可观察结果。
 保留原验收合同，未验证功能不能标记 done；可标记 deferred 并注明实现/模拟/缺失与配置 TODO，继续依赖任务。外部依赖不足或难解问题允许明确模拟/绕过，不阻止交付实际可启动的演示。该阶段使用独立的 token/轮数预算，达到上限保存检查点并停止；全部真实调用仍计费。工具调用必须符合 schema。浏览器验收按源码、运行配置和场景指纹去重；同一版本已有成功证据时不要再次调用 browser_check，直接复用证据继续完成任务。
 每次只修复具体故障，准备好后简要总结已可演示内容及下一步可优化方向，由系统执行真实启动和检查。'''
+DELIVERY_INSTRUCTION += DEPENDENCY_POLICY
 
 
 class DeliveryLimitReached(RuntimeError):
     """The independent delivery allowance is exhausted; preserve resumable work."""
+
+
+def budgeted_chat(gateway, budget, guard):
+    """Preserve ModelGateway.chat's positional/keyword contract on every path.
+
+    Adapters and pending-request recovery can reenter with positional options.
+    Narrow wrappers used to crash only after a job changed stages or resumed.
+    """
+    from agent_session import estimate_tokens
+    from coding_runtime import model_output_limit
+    original_chat = gateway.chat
+
+    async def bounded_chat(client, state, messages, tools=None, max_tokens=None, reasoning=None, **kwargs):
+        guard()
+        if budget.phase == 'stabilization':
+            available = budget.repair_token_limit - budget.repair_tokens - estimate_tokens(messages, tools)
+            if available < 512:
+                guard(reason='request_reserve')
+            max_tokens = min(max_tokens or model_output_limit(gateway.model_for(state), state), available)
+        # Omit unspecified options for older adapters; preserve explicit values.
+        if max_tokens is not None:
+            kwargs['max_tokens'] = max_tokens
+        if reasoning is not None:
+            kwargs['reasoning'] = reasoning
+        return await original_chat(client, state, messages, tools, **kwargs)
+
+    return bounded_chat

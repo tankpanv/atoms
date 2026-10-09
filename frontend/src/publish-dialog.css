@@ -10,6 +10,7 @@
 .publish-dialog-url button{display:grid;place-items:center;flex:none;width:32px;height:32px;border:0;background:transparent;color:#555;border-radius:6px}
 .publish-dialog-url button:hover{background:#eee}.publish-dialog-url button:disabled{opacity:.35}
 .publish-settings{border:1px solid #ddd;border-radius:12px;margin-top:20px;overflow:hidden}
+.publish-version-picker{margin-top:20px}.publish-version-picker select{width:100%;padding:12px;border:1px solid #ddd;border-radius:9px;background:#fff;color:#333;font:inherit}.publish-version-picker select:focus{outline:2px solid #4564ff;outline-offset:2px}.publish-version-picker select:disabled{background:#f5f5f5;color:#888}.publish-version-picker p{font-size:12px;color:#777;line-height:1.6;margin:9px 0 0}
 .publish-settings-toggle{width:100%;height:60px;display:flex;align-items:center;justify-content:space-between;border:0;background:transparent;color:#222;padding:0 17px;font-size:15px}
 .publish-settings-toggle svg{transition:transform .15s}.publish-settings-toggle svg.expanded{transform:rotate(180deg)}
 .publish-settings-body{padding:0 17px 16px}.publish-settings-body>div{display:flex;align-items:center;justify-content:space-between;padding:15px;border:1px solid #eee;border-radius:10px}.publish-settings-body span{display:flex;align-items:center;gap:8px}.publish-settings-body p{font-size:12px;color:#888;line-height:1.6}.publish-offline-button{border:1px solid #ebcccc;background:#fff;color:#c44545;padding:8px 12px;border-radius:7px}

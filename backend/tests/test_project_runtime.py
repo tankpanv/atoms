@@ -58,6 +58,62 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         source = Path(__file__).parents[1] / 'templates/api-v1/backend/requirements.txt'
         (self.root / 'requirements.txt').write_bytes(source.read_bytes())
 
+    async def test_runtime_is_starting_until_http_readiness_succeeds(self):
+        (self.root / 'index.html').write_text('ready')
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = runtime._wait_ready
+        async def wait(*args):
+            entered.set()
+            await release.wait()
+            await original(*args)
+        with patch('runtime._wait_ready', side_effect=wait):
+            task = asyncio.create_task(runtime.start_runtime(self.project_id, 'python -m http.server $PORT --bind 127.0.0.1'))
+            try:
+                await asyncio.wait_for(entered.wait(), 10)
+                status = runtime.runtime_status(self.project_id)
+                self.assertTrue(status['starting'])
+                self.assertFalse(status['running'])
+                token = status['url'].split('/')[-2]
+                self.assertIsNone(runtime.runtime_by_token(token))
+            finally:
+                release.set()
+                started = await task
+        self.assertFalse(runtime.runtime_status(self.project_id)['starting'])
+        self.assertTrue(runtime.runtime_status(self.project_id)['running'])
+        self.assertIs(runtime.runtime_by_token(token), started)
+
+    async def test_multipart_upload_streams_more_than_25mb_to_project_service(self):
+        (self.root / 'server.py').write_text('''import http.server, json, os
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_POST(self):
+        remaining = total = int(self.headers['Content-Length'])
+        while remaining:
+            chunk = self.rfile.read(min(65536, remaining))
+            if not chunk:
+                raise RuntimeError('incomplete upload')
+            remaining -= len(chunk)
+        data = json.dumps({'received_bytes': total}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+http.server.HTTPServer(('127.0.0.1', int(os.environ['PORT'])), Handler).serve_forever()
+''')
+        (self.root / '.atoms-workspace.json').write_text(json.dumps({'dev': 'python server.py'}))
+        asset = self.root / 'large.bin'
+        with asset.open('wb') as stream:
+            stream.truncate(26 * 1024 * 1024)
+        code, output = await http_request(self.project_id, {
+            'method': 'POST', 'path': '/upload', 'form': {'title': 'large asset'},
+            'files': [{'field': 'file', 'path': 'large.bin'}], 'expect_status': 200})
+        self.assertEqual(code, 0, output)
+        report = json.loads(output)
+        body = report['body']
+        if isinstance(body, str):
+            body = json.loads(body)
+        self.assertGreater(body['received_bytes'], asset.stat().st_size)
+
     async def test_dependencies_start_first_and_stop_with_main(self):
         self.configure_servers()
         started = await runtime.start_runtime(self.project_id)

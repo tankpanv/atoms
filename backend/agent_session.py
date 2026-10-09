@@ -6,6 +6,7 @@ and its audit event together; provider cache hints are only an optimization.
 from __future__ import annotations
 
 import copy
+import base64
 from contextlib import contextmanager
 import hashlib
 import json
@@ -77,8 +78,13 @@ class SourceManifest(dict):
 def inventory(files):
     if isinstance(files, SourceManifest):
         return dict(files.hashes)
-    return {name: hashlib.sha256((content if isinstance(content, str) else encoded(content)).encode()).hexdigest() for name, content in files.items()
-            if not name.startswith('.atoms/')}
+    def checksum(value):
+        if isinstance(value, dict) and value.get('encoding') == 'blob':
+            return value['sha256']
+        if isinstance(value, dict) and value.get('encoding') == 'base64':
+            return hashlib.sha256(base64.b64decode(value['content'], validate=True)).hexdigest()
+        return hashlib.sha256((value if isinstance(value, str) else encoded(value)).encode()).hexdigest()
+    return {name: checksum(content) for name, content in files.items() if not name.startswith('.atoms/')}
 
 
 def estimate_tokens(messages, tools=None):
@@ -450,10 +456,13 @@ class AgentSession:
 
     def read(self, name, content, offset, limit, messages):
         sha = hashlib.sha256(content.encode()).hexdigest()
+        return self.read_range(name, sha, content[offset:offset + limit], len(content), offset, limit, messages, content)
+
+    def read_range(self, name, sha, part, total, offset, limit, messages, full_content=None):
         key = digest([name, sha, offset, limit])
         with self.connect() as conn:
             row = conn.execute('SELECT result FROM reads WHERE key=?', (key,)).fetchone()
-            result = row[0] if row else f'{name} [{offset}:{min(offset + limit, len(content))}/{len(content)}]\n{content[offset:offset + limit]}'
+            result = row[0] if row else f'{name} [{offset}:{min(offset + limit, total)}/{total}]\n{part}'
             conn.execute('INSERT OR REPLACE INTO reads VALUES(?,?,?,?,?)', (key, name, sha, result, time.time()))
             conn.execute('DELETE FROM reads WHERE key NOT IN (SELECT key FROM reads ORDER BY used_at DESC LIMIT 250)')
         marker = f'[文件版本 {sha[:16]}]'
@@ -468,9 +477,10 @@ class AgentSession:
                         except ValueError:
                             continue
                         candidates = args.get('files', []) if call['function']['name'] == 'write_files' else [args]
-                        if any(item.get('path') == name and item.get('content') == content for item in candidates):
+                        if any(item.get('path') == name and isinstance(item.get('content'), str)
+                               and hashlib.sha256(item['content'].encode()).hexdigest() == sha for item in candidates):
                             known = True
-        self._remember_source(name, content)
+        self._remember_source(name, full_content)
         if known:
             self.state['local_read_hits'] = self.state.get('local_read_hits', 0) + 1
             return f'{name} 没有变化（{marker}）；该区间已在当前上下文中，请直接使用已有内容。'
@@ -483,6 +493,14 @@ class AgentSession:
                         'original_goal': ledger.request[:8000],
                         'tasks': [{'id': t['id'], 'title': t['title'], 'status': t['status']} for t in ledger.tasks],
                         'recent_actions': journal[-12:], 'conversation': [p[:1200] for p in prose[-10:]]})
+
+    def feedback(self, messages, topic, content):
+        """Replace stale coordinator advice, keeping its exact text in audit."""
+        marker = f'执行器反馈[{topic}]：'
+        messages[:] = [m for m in messages if not (m.get('role') == 'user'
+                      and isinstance(m.get('content'), str) and m['content'].startswith(marker))]
+        messages.append({'role': 'user', 'content': marker + content})
+        self.save('coordinator_feedback', {'topic': topic, 'content': content})
 
     def compact(self, messages, prefix_length, ledger, journal, summary):
         starts = [i for i in range(prefix_length, len(messages)) if messages[i].get('role') == 'assistant']

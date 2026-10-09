@@ -3,8 +3,10 @@
 server {
     listen 80 default_server;
     server_name 120.55.37.39;
+    client_max_body_size 0;
 
     location / {
+        proxy_request_buffering off;
         proxy_pass http://127.0.0.1:25173;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

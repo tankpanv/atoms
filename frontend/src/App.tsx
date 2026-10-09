@@ -4,14 +4,13 @@ import AuthPage from './AuthPage'
 import ToolsSelector, { savedBuildTools, type BuildTool } from './ToolsSelector'
 import BuildTierSelector, { savedBuildTier, type BuildTier } from './BuildTierSelector'
 import ChatWorkspace, { type MessageOptions } from './ChatWorkspace'
-import VoiceInput from './VoiceInput'
 import PendingAttachments from './PendingAttachments'
 import AccountMenu, { AccountAvatar } from './AccountMenu'
 import AccountSettings, { RedeemDialog } from './AccountSettings'
 import { accountApi, saveAccount, type Account } from './account'
 import { formatCredits } from './numberFormat'
 import { copyLink } from './clipboard'
-import PublishDialog from './PublishDialog'
+import PublishDialog, { type PublishedRelease, type PublishVersion } from './PublishDialog'
 import PublishedProjectDetail from './PublishedProjectDetail'
 import { ProjectMenu, ProjectDialog, ProjectSettings, type ProjectAction } from './ProjectMenu'
 import { RecentProject, DeleteProjectDialog } from './ProjectActions'
@@ -127,7 +126,7 @@ function PromptBox({ onSubmit, busy, models, selectedModel, onModelChange, initi
       <textarea value={value} onChange={event => setValue(event.target.value)} onPaste={event => { const selected = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/')); if (selected.length) { event.preventDefault(); void addMedia(selected) } }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} placeholder={compact ? '向 Alex 描述你希望修改的地方…' : '请Alex构建'} aria-label="描述你的想法" />
       <div className="prompt-controls">
         <div className="prompt-left"><div className="relative" data-prompt-menu="add"><IconButton icon={Plus} label="添加工具或附件" onClick={() => setMenu(menu === 'add' ? null : 'add')} className="circle-control" />{menu === 'add' && <div className="popover add-menu"><button onClick={() => { setMenu(null); onChooseExperts() }}><Sparkles size={17} /> 专家 <ChevronRight size={15} /></button><button onClick={() => { setMenu(null); mediaRef.current?.click() }}><Paperclip size={17} /> 上传图片</button><button onClick={() => { setMenu(null); fileRef.current?.click() }}><Paperclip size={17} /> 上传文档</button><button onClick={() => { setKind('Web'); setMenu(null) }}><Globe2 size={17} /> 网页项目 {kind === 'Web' && <Check size={15} />}</button><button onClick={() => { setKind('App'); setMenu(null) }}><Square size={17} /> 应用项目 {kind === 'App' && <Check size={15} />}</button><button onClick={() => { setValue(text => `${text}请先研究市场和用户需求，再给出产品方案。`); setMenu(null) }}><Search size={17} /> 深度研究</button><button onClick={() => { setValue(text => `${text}请提供三种不同设计方案供比较。`); setMenu(null) }}><WandSparkles size={17} /> 竞赛模式</button><button onClick={() => { document.dispatchEvent(new Event('open-connectors')); setMenu(null) }}><Zap size={17} /> 连接工具</button></div>}</div><input ref={fileRef} type="file" accept={documentAccept} multiple hidden onChange={event => { void chooseFiles(event.target.files); event.target.value = '' }} /><input ref={mediaRef} type="file" accept={mediaAccept} multiple hidden onChange={event => { void addMedia(Array.from(event.target.files || [])); event.target.value = '' }} /><ModelSelector models={models} value={selectedModel} onChange={onModelChange} /><div className="prompt-inline-experts">{expertControl}</div>{toolsControl}</div>
-        <div className="prompt-right">{tierControl}<div className="relative" data-prompt-menu="mode"><button className="mode-button" onClick={() => setMenu(menu === 'mode' ? null : 'mode')}>{mode === 'Build' ? '构建' : '目标'} <ChevronDown size={13} /></button>{menu === 'mode' && <div className="popover mode-menu"><button onClick={() => { setMode('Build'); setMenu(null) }}><Code2 size={17} /><span><b>构建</b><small>直接构建产品</small></span></button><button onClick={() => { setMode('Goal'); setMenu(null) }}><Sparkles size={17} /><span><b>目标</b><small>从目标开始规划</small></span></button></div>}</div><VoiceInput draft={value} setDraft={setValue} onError={message => alert(message)} className="circle-control" /><button className="send-button" disabled={(!value.trim() && !media.length && !documents.length) || busy} onClick={() => void send()} aria-label="发送需求">{busy ? <span className="spinner" /> : <ArrowUp size={20} />}</button></div>
+        <div className="prompt-right">{tierControl}<div className="relative" data-prompt-menu="mode"><button className="mode-button" onClick={() => setMenu(menu === 'mode' ? null : 'mode')}>{mode === 'Build' ? '构建' : '目标'} <ChevronDown size={13} /></button>{menu === 'mode' && <div className="popover mode-menu"><button onClick={() => { setMode('Build'); setMenu(null) }}><Code2 size={17} /><span><b>构建</b><small>直接构建产品</small></span></button><button onClick={() => { setMode('Goal'); setMenu(null) }}><Sparkles size={17} /><span><b>目标</b><small>从目标开始规划</small></span></button></div>}</div><button className="send-button" disabled={(!value.trim() && !media.length && !documents.length) || busy} onClick={() => void send()} aria-label="发送需求">{busy ? <span className="spinner" /> : <ArrowUp size={20} />}</button></div>
       </div>
     </div>
     {!compact && <button className="connect-strip" onClick={() => document.dispatchEvent(new Event('open-connectors'))}><span><Zap size={15} /> 将你的工具连接到 Atoms</span><span className="connector-icons"><i>▣</i><i>✚</i><i>◉</i><i>▲</i><i>▥</i></span><X size={14} /></button>}
@@ -153,6 +152,10 @@ function App() {
   const [publishBusy, setPublishBusy] = useState(false)
   const [publishSuccess, setPublishSuccess] = useState(false)
   const [publishError, setPublishError] = useState('')
+  const [publishPhase, setPublishPhase] = useState('')
+  const [publishedReleases, setPublishedReleases] = useState<PublishedRelease[]>([])
+  const [publishVersions, setPublishVersions] = useState<{ projectId: string; versions: PublishVersion[] } | null>(null)
+  const [publishVersionsLoading, setPublishVersionsLoading] = useState(false)
   const [prefill, setPrefill] = useState('')
   const [profileOpen, setProfileOpen] = useState(false)
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
@@ -308,12 +311,72 @@ function App() {
   const favoriteProject = (project: Project) => { void patchProject(project, { favorite: !project.favorite }).catch(e => setError(e.message)) }
 
   const publishUrl = detail ? `${window.location.origin}${detail.publish_slug ? `/api/sites/${detail.publish_slug}` : `/api/public/${detail.id}`}` : ''
-  const publishProject = async () => {
+  const loadPublishedReleases = async (id: string) => {
+    const result = await api<{ releases: PublishedRelease[] }>(`/projects/${id}/releases`)
+    setPublishedReleases(result.releases)
+  }
+  const waitForPublication = async (id: string, releaseId: string, cancelled: () => boolean = () => false) => {
+    for (;;) {
+      if (cancelled()) return
+      const result = await api<{ publication: PublishedRelease | null; published: boolean; active_release_id: string | null }>(`/projects/${id}/publication`)
+      const release = result.publication
+      if (!release || release.id !== releaseId) throw new Error('发布状态已变化，请查看发布版本')
+      setPublishPhase(release.phase)
+      if (release.status === 'failed') throw new Error(release.error || '发布失败，旧版本继续运行')
+      if (release.status === 'active' && result.active_release_id === releaseId && result.published) break
+      if (release.status === 'retired') throw new Error('此发布已停止或被替换')
+      await new Promise(resolve => window.setTimeout(resolve, 1500))
+    }
+    const updated = await api<ProjectDetail>(`/projects/${id}`)
+    setDetail(current => current?.id === id ? updated : current)
+    await loadPublishedReleases(id)
+  }
+  useEffect(() => {
+    if (modal === 'publish' && detail) void loadPublishedReleases(detail.id).catch(() => {})
+  }, [modal, detail?.id])
+  useEffect(() => {
+    if (modal !== 'publish' || !detail) return
+    const id = detail.id
+    let cancelled = false
+    setPublishVersionsLoading(true)
+    void api<PublishVersion[]>(`/projects/${id}/versions`).then(versions => {
+      if (!cancelled) setPublishVersions({ projectId: id, versions })
+    }).catch((error: Error) => { if (!cancelled) { setPublishVersions(null); setPublishError(error.message) } })
+      .finally(() => { if (!cancelled) setPublishVersionsLoading(false) })
+    return () => { cancelled = true }
+  }, [modal, detail?.id, detail?.status])
+  useEffect(() => {
+    if (!detail) return
+    const id = detail.id
+    let cancelled = false
+    void api<{ publication: PublishedRelease | null }>(`/projects/${id}/publication`).then(async result => {
+      if (cancelled || !result.publication || !['queued', 'packaging', 'building', 'starting'].includes(result.publication.status)) return
+      setPublishBusy(true); setPublishSuccess(false); setPublishError(''); setModal('publish')
+      try { await waitForPublication(id, result.publication.id, () => cancelled); if (!cancelled) setPublishSuccess(true) }
+      catch (e) { if (!cancelled) setPublishError((e as Error).message) }
+      finally { if (!cancelled) setPublishBusy(false) }
+    }).catch(() => {})
+    return () => { cancelled = true; setPublishBusy(false) }
+  }, [detail?.id])
+  const publishProject = async (version?: number) => {
     if (!detail || publishBusy) return
     setPublishBusy(true); setPublishError(''); setPublishSuccess(false); setModal('publish')
     try {
-      const updated = await api<Project>(`/projects/${detail.id}`, { method: 'PATCH', body: JSON.stringify({ published: true }) })
-      setDetail(current => current?.id === detail.id ? { ...current, published: updated.published } : current)
+      const updated = await api<Project & { publication: PublishedRelease }>(`/projects/${detail.id}`, { method: 'PATCH', body: JSON.stringify({ published: true, ...(version ? { publish_version: version } : {}) }) })
+      await waitForPublication(detail.id, updated.publication.id)
+      setPublishSuccess(true)
+      await refresh()
+    } catch (e) { setPublishError((e as Error).message) }
+    finally { setPublishBusy(false) }
+  }
+  const rollbackPublishedRelease = async (releaseId: string) => {
+    if (!detail || publishBusy) return
+    setPublishBusy(true); setPublishError(''); setPublishSuccess(false); setPublishPhase('正在恢复已验证的发布版本')
+    try {
+      await api(`/projects/${detail.id}/releases/${releaseId}/activate`, { method: 'POST' })
+      const updated = await api<ProjectDetail>(`/projects/${detail.id}`)
+      setDetail(current => current?.id === detail.id ? updated : current)
+      await loadPublishedReleases(detail.id)
       setPublishSuccess(true)
       await refresh()
     } catch (e) { setPublishError((e as Error).message) }
@@ -414,7 +477,7 @@ function App() {
       )}
     </div>
     {deleteTarget && <DeleteProjectDialog title={deleteTarget.title} busy={deleteBusy} error={deleteError} onCancel={() => { if (!deleteBusy) setDeleteTarget(null) }} onConfirm={() => void confirmDeleteProject()} />}
-    {modal === 'publish' && detail ? <PublishDialog key={detail.id} url={publishUrl} published={detail.published} busy={publishBusy} success={publishSuccess && !publishBusy} canPublish={!!detail.preview_html && detail.status !== 'running' && detail.status !== 'queued'} error={publishError} onPublish={() => void publishProject()} onUnpublish={() => void unpublishProject()} onShare={() => setModal('share')} onClose={() => { if (!publishBusy) setModal(null) }} /> : modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null) }}><div className="modal"><div className="modal-top"><h2>{modal === 'settings' ? '设置' : modal === 'credits' ? '积分与计划' : modal === 'share' ? '分享项目' : '连接你的工具'}</h2><IconButton icon={X} label="关闭" onClick={() => setModal(null)} /></div>{modal === 'share' ? <div className="modal-body"><p>{detail?.published ? '项目已发布。复制链接即可分享当前版本。' : '发布项目后即可获得公开访问链接。'}</p>{detail?.published ? <><input className="share-link" readOnly value={publishUrl} /><button className="primary-button" onClick={() => { void copyLink(publishUrl).then(() => setShareCopyError('')).catch((error: Error) => setShareCopyError(error.message)) }}>复制链接</button>{shareCopyError && <p className="account-error" role="alert">{shareCopyError}</p>}</> : <button className="primary-button" onClick={() => void publishProject()}>发布项目</button>}<button className="secondary-button" onClick={() => { if (detail) downloadProject(detail) }}><Download size={17} /> 下载项目 ZIP</button></div> : null}</div></div>}
+    {modal === 'publish' && detail ? <PublishDialog key={detail.id} url={publishUrl} published={detail.published} busy={publishBusy} success={publishSuccess && !publishBusy} canPublish={!['deleting', 'cloning'].includes(detail.status)} versions={publishVersions?.projectId === detail.id ? publishVersions.versions : []} versionsLoading={publishVersionsLoading} error={publishError} phase={publishPhase} releases={publishedReleases} onRollback={id => void rollbackPublishedRelease(id)} onPublish={version => void publishProject(version)} onUnpublish={() => void unpublishProject()} onShare={() => setModal('share')} onClose={() => { if (!publishBusy) setModal(null) }} /> : modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null) }}><div className="modal"><div className="modal-top"><h2>{modal === 'settings' ? '设置' : modal === 'credits' ? '积分与计划' : modal === 'share' ? '分享项目' : '连接你的工具'}</h2><IconButton icon={X} label="关闭" onClick={() => setModal(null)} /></div>{modal === 'share' ? <div className="modal-body"><p>{detail?.published ? '项目已发布。复制链接即可分享当前版本。' : '发布项目后即可获得公开访问链接。'}</p>{detail?.published ? <><input className="share-link" readOnly value={publishUrl} /><button className="primary-button" onClick={() => { void copyLink(publishUrl).then(() => setShareCopyError('')).catch((error: Error) => setShareCopyError(error.message)) }}>复制链接</button>{shareCopyError && <p className="account-error" role="alert">{shareCopyError}</p>}</> : <button className="primary-button" onClick={() => void publishProject()}>发布项目</button>}<button className="secondary-button" onClick={() => { if (detail) downloadProject(detail) }}><Download size={17} /> 下载项目 ZIP</button></div> : null}</div></div>}
     {settingsPage && ['projectGeneral', 'domain'].includes(settingsPage) && detail && <ProjectSettings project={detail} account={account} page={settingsPage} onNavigate={openSettings} onClose={closeSettings} onAction={setProjectAction} onDelete={() => removeProject(detail.id)} onUnpublish={() => patchProject(detail, { published: false })} onBadge={value => patchProject(detail, { remove_badge: value })} onSlug={value => patchProject(detail, { publish_slug: value })} publicUrl={publishUrl} />}
     {projectAction && (renameTarget || detail) && <ProjectDialog key={`${projectAction}-${(renameTarget || detail)!.id}`} action={projectAction} project={(renameTarget || detail)!} account={account} onClose={() => { setProjectAction(null); setRenameTarget(null) }} onRename={name => patchProject((renameTarget || detail)!, { title: name })} onClone={async (title, copy_database) => { const next = await api<Project>(`/projects/${(renameTarget || detail)!.id}/clone`, { method: 'POST', body: JSON.stringify({ title, copy_database }) }); closeSettings(); await refresh(); openProject(next.id) }} onPrivacy={value => patchProject((renameTarget || detail)!, { visibility: value })} onRedeem={() => { setProjectAction(null); setRedeemOpen(true) }} onChooseClone={() => setProjectAction('clone')} />}
     {settingsPage && !['projectGeneral', 'domain'].includes(settingsPage) && account && <AccountSettings account={account} page={settingsPage} models={models} onChange={updateAccount} onNavigate={openSettings} onClose={closeSettings} onProfile={() => route('/zh/profile')} onProject={id => { openProject(id); void refresh() }} />}

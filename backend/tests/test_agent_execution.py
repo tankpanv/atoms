@@ -57,7 +57,7 @@ class AgentExecutionTests(unittest.IsolatedAsyncioTestCase):
             with patch('agent.ensure_workspace', return_value=root), patch('agent.project_uid', return_value=os.getuid()), patch('agent.ModelGateway', Gateway):
                 result = await run_agent(uuid.UUID(hex=root.name), 'Create greeting CLI', 'test-model', step, plan=json.dumps(cli_plan()))
             self.assertEqual(machine.current, AgentState.COMPLETE)
-            self.assertTrue(result['summary'].startswith('Implemented and verified the greeting CLI.'))
+            self.assertIn('验证通过', result['summary'])
             self.assertNotIn('尚未完成自动验证', result['summary'])
             state = json.loads((root/'.atoms/task-state.json').read_text())
             self.assertEqual(state['tasks'][0]['status'], 'done')

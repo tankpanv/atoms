@@ -39,6 +39,7 @@ class Runtime:
     services: list[Service] = field(default_factory=list)
     configuration: str = ""
     source_version: str = ""
+    ready: bool = False
 
     @property
     def prefix(self):
@@ -49,6 +50,32 @@ _runtimes: dict[uuid.UUID, Runtime] = {}
 _tokens: dict[str, Runtime] = {}
 _locks: dict[uuid.UUID, asyncio.Lock] = {}
 _reserved_ports: set[int] = set()
+
+
+def base_path_aware(root, command):
+    """The gateway must retain the prefix consumed by the actual Vite config.
+
+    Explicit dev commands often pass $PORT but let vite.config read BASE_PATH.
+    Checking only the command made readiness pass while every API call failed.
+    A workspace override covers less conventional runners/configurations.
+    """
+    config = root / '.atoms-workspace.json'
+    if config.exists():
+        value = json.loads(config.read_text()).get('base_aware')
+        if value is not None:
+            if not isinstance(value, bool):
+                raise RuntimeError('工作区 base_aware 必须为布尔值')
+            return value
+    if '$BASE_PATH' in command:
+        return True
+    if not re.search(r'\b(?:npm|pnpm|yarn|vite)\b', command):
+        return False
+    for directory in (root, root / 'frontend'):
+        for suffix in ('ts', 'js', 'mts', 'mjs', 'cts', 'cjs'):
+            path = directory / ('vite.config.' + suffix)
+            if path.is_file() and re.search(r"process\.env(?:\.BASE_PATH|\[\s*['\"]BASE_PATH['\"]\s*\])", path.read_text()):
+                return True
+    return False
 
 
 def detected_command(project_id: uuid.UUID):
@@ -62,7 +89,7 @@ def detected_command(project_id: uuid.UUID):
         except (ValueError, OSError) as exc:
             raise RuntimeError(f"工作区配置无效：{exc}") from exc
         if configured:
-            return configured, "$BASE_PATH" in configured
+            return configured, base_path_aware(root, configured)
     package = root / "package.json"
     if package.exists():
         try:
@@ -101,7 +128,6 @@ def _workspace_user(uid: int):
     resource.setrlimit(resource.RLIMIT_NPROC, (256, 256))
     resource.setrlimit(resource.RLIMIT_CPU, (3600, 3600))
     resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
 
 
 async def _capture_output(runtime: Runtime):
@@ -213,7 +239,7 @@ async def start_runtime(project_id: uuid.UUID, configured_command: str = "", res
         if python_code:
             raise RuntimeError(f'Python 依赖准备失败：{python_output[-3000:]}')
         if configured_command:
-            base_aware = "$BASE_PATH" in configured_command
+            base_aware = base_path_aware(root, configured_command)
         if (root / "package.json").exists() and not (root / "node_modules").exists():
             code, output = await run_command(project_id, ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"], 120)
             if code:
@@ -240,6 +266,8 @@ async def start_runtime(project_id: uuid.UUID, configured_command: str = "", res
         from project_python import environment as python_environment
         env.update(python_environment(root, uid))
         env.update(database_environment(project_id))
+        from project_secrets import environment as secret_environment
+        env.update(secret_environment(root, uid))
         started_services = []
         try:
             for spec in services:
@@ -274,6 +302,7 @@ async def start_runtime(project_id: uuid.UUID, configured_command: str = "", res
         path = prefix + "/" if base_aware else "/"
         try:
             await _wait_ready(process, port, path, lambda: runtime.output)
+            runtime.ready = True
             return runtime
         except BaseException:
             await stop_runtime(project_id)
@@ -282,14 +311,15 @@ async def start_runtime(project_id: uuid.UUID, configured_command: str = "", res
 
 def runtime_by_token(token: str):
     runtime = _tokens.get(token)
-    return runtime if runtime and runtime.process.returncode is None and all(service.process.returncode is None for service in runtime.services) else None
+    return runtime if runtime and runtime.ready and runtime.process.returncode is None and all(service.process.returncode is None for service in runtime.services) else None
 
 
 def runtime_status(project_id: uuid.UUID):
     runtime = _runtimes.get(project_id)
     if not runtime:
         return None
-    return {"running": runtime_by_token(runtime.token) is not None, "command": runtime.command,
+    return {"running": runtime_by_token(runtime.token) is not None,
+            "starting": not runtime.ready and runtime.process.returncode is None, "command": runtime.command,
             "output": runtime.output[-4000:] + "".join(f"\n[{service.name}]\n{service.output[-2000:]}" for service in runtime.services),
             "url": runtime.prefix + "/", "services": [{"name": service.name, "running": service.process.returncode is None} for service in runtime.services]}
 

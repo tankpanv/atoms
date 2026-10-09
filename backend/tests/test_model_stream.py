@@ -47,6 +47,10 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
                 root = Path(directory); session = AgentSession(root)
                 session.state['pending_model'] = {'job_id': active_job.get(), 'payload': old}; session.save('pending')
                 gateway = ModelGateway('test'); gateway.session = AgentSession(root)
+                from agent_delivery import DeliveryBudget, budgeted_chat
+                import time
+                budget = DeliveryBudget(1000000, 120, time.monotonic() + 60)
+                gateway.chat = budgeted_chat(gateway, budget, lambda **kw: None)
                 messages = [{'role': 'user', 'content': 'Current planning goal'}]
                 async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                     result = await gateway.chat(client, AgentState.PLAN, messages)
@@ -88,6 +92,49 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(AgentSession(Path(directory)).state['pending_model']['payload'], old)
         finally:
             active_job.reset(token)
+
+    async def test_pending_replay_uses_original_context_even_when_resume_messages_overflow(self):
+        import tempfile, uuid
+        from pathlib import Path
+        from billing_context import active_job
+        from agent_session import AgentSession
+        requests = []
+        old = {'model': 'test', 'messages': [{'role': 'user', 'content': 'Original bounded request'}],
+               'stream': True, 'max_tokens': 1000, '_billing_stage': 'IMPLEMENT', '_billing_request': str(uuid.uuid4())}
+        def handler(request):
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json={'choices': [{'message': {'content': 'Recovered original'}, 'finish_reason': 'stop'}], 'usage': {}})
+        token = active_job.set(str(uuid.uuid4()))
+        try:
+            with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {'WORKER_TOKEN': 'test', 'PROJECT_ID': uuid.uuid4().hex}):
+                session = AgentSession(Path(directory))
+                old['_billing_job'] = active_job.get()
+                session.state['pending_model'] = {'job_id': active_job.get(), 'payload': old}
+                session.save('pending')
+                gateway = ModelGateway('test'); gateway.session = session
+                messages = [{'role': 'user', 'content': '恢复说明' * 100000}]
+                async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                    result = await gateway.chat(client, AgentState.IMPLEMENT, messages)
+                self.assertEqual(requests, [old])
+                self.assertEqual(messages, old['messages'])
+                self.assertEqual(result['_response_meta']['max_tokens'], old['max_tokens'])
+                self.assertNotIn('pending_model', AgentSession(Path(directory)).state)
+        finally:
+            active_job.reset(token)
+
+    async def test_fresh_request_clamps_output_to_actual_remaining_context(self):
+        from agent_session import estimate_tokens
+        requests = []
+        def handler(request):
+            requests.append(json.loads(request.content))
+            return stream({'choices': [{'delta': {'content': 'Done'}, 'finish_reason': 'stop'}]})
+        messages = [{'role': 'user', 'content': '当前实现' * 6000}]
+        with patch.dict('os.environ', {'AI_API_KEY': 'test', 'WORKER_TOKEN': ''}), \
+             patch('model_catalog.catalog', return_value=[{'id': 'test', 'context': 64000}]):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                result = await ModelGateway('test').chat(client, AgentState.IMPLEMENT, messages, max_tokens=60000)
+        self.assertEqual(requests[0]['max_tokens'], 64000 - estimate_tokens(messages) - 4000)
+        self.assertEqual(result['_response_meta']['max_tokens'], requests[0]['max_tokens'])
 
     async def test_pending_request_survives_job_resume_without_new_generation(self):
         import tempfile, uuid

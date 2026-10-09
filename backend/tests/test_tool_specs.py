@@ -7,23 +7,29 @@ class ToolSpecsTests(unittest.TestCase):
     def parse(self,name,args):
         return parse_tool_arguments({'function':{'name':name,'arguments':json.dumps(args)}},TOOLS)
 
-    def test_all_tools_reject_unknown_fields_and_describe_string_bounds(self):
+    def test_all_tools_reject_unknown_fields_and_only_bound_control_strings(self):
         for tool in TOOLS:
             schema=tool['function']['parameters']
             self.assertFalse(schema['additionalProperties'])
             with self.assertRaises(ToolArgumentError):self.parse(tool['function']['name'],{'unexpected':1})
-            def check(node):
-                if node.get('type')=='string':self.assertIn('maxLength',node)
-                for child in node.get('properties',{}).values():check(child)
-                if 'items' in node:check(node['items'])
-                for child in node.get('oneOf',[]):check(child)
+            def check(node, field=''):
+                if node.get('type')=='string':
+                    if field in ('content', 'old', 'new', 'patch'):
+                        self.assertNotIn('maxLength',node)
+                        self.assertTrue(node['x-noNul'])
+                    else:self.assertIn('maxLength',node)
+                for field,child in node.get('properties',{}).items():check(child,field)
+                if 'items' in node:check(node['items'],field)
+                for child in node.get('oneOf',[]):check(child,field)
             check(schema)
 
     def test_strings_bytes_and_empty_content(self):
-        for name,args in [('run_shell',{'command':' '*3}),('run_shell',{'command':'x'*2001}),('write_file',{'path':'x','content':'中'*40001}),('replace_in_file',{'path':'x','old':'','new':''}),('search_code',{'query':' '}),('read_file',{'path':'x\x00'})]:
+        for name,args in [('run_shell',{'command':' '*3}),('run_shell',{'command':'x'*2001}),('write_file',{'path':'x','content':'text\x00'}),('replace_in_file',{'path':'x','old':'','new':''}),('search_code',{'query':' '}),('read_file',{'path':'x\x00'})]:
             with self.assertRaises(ToolArgumentError):self.parse(name,args)
         self.assertEqual(self.parse('write_file',{'path':'empty.txt','content':''})['content'],'')
-        self.parse('write_file',{'path':'x','content':'中'*40000})
+        content = '中' * 100000
+        self.assertEqual(self.parse('write_file',{'path':'x','content':content})['content'], content)
+        self.parse('replace_in_file',{'path':'x','old':content,'new':content + 'changed'})
 
     def test_wrong_types_ranges_and_action_specific_keys(self):
         for name,args in [('read_file',{'path':'x','offset':-1}),('read_file',{'path':'x','limit':True}),('read_code',{'path':'x','start_line':0}),('http_request',{'path':'/','expect_status':600}),('http_request',{'path':'https://example.test','expect_status':200}),('browser_check',{'actions':[]}),('browser_check',{'actions':[{'action':'reload','value':'ignored'}]}),('read_document',{'id':'filename.txt'}),('run_build',{'requirement_ids':['R1','R1']})]:

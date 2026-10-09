@@ -12,6 +12,7 @@ from main import app as gateway_app, connection, VISUAL_EDITOR_SCRIPT
 
 
 from browser_storage import STORAGE_SHIM
+from preview_diagnostics import PREVIEW_DIAGNOSTICS, inject_preview_diagnostics, remove_preview_diagnostics
 
 
 def project_cors_headers(scope):
@@ -90,11 +91,9 @@ class PreviewHeaders:
         if start_message is not None:
             html = b"".join(html_parts).decode("utf-8", errors="replace")
             html = re.sub(r'<script data-atoms-visual-editor>.*?</script>', '', html, flags=re.DOTALL)
-            preview_scripts = STORAGE_SHIM + VISUAL_EDITOR_SCRIPT
-            html, replacements = re.subn(r"<head(?:\s[^>]*)?>", lambda found: found.group(0) + preview_scripts,
-                                         html, count=1, flags=re.IGNORECASE)
-            if not replacements:
-                html = preview_scripts + html
+            html = remove_preview_diagnostics(html)
+            preview_scripts = STORAGE_SHIM + PREVIEW_DIAGNOSTICS + VISUAL_EDITOR_SCRIPT
+            html = inject_preview_diagnostics(html, preview_scripts)
             await send(start_message)
             await send({"type": "http.response.body", "body": html.encode("utf-8"), "more_body": False})
 
@@ -127,9 +126,13 @@ async def storage(token: str, request: Request):
         return Response(status_code=200)
     project_id = project_for_token(token)
     if request.method == "GET":
+        session = request.query_params.get('session','')
+        if session and not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',session):
+            raise HTTPException(422,'预览会话标识无效')
         with connection() as conn:
-            row = conn.execute("SELECT data FROM preview_storage WHERE project_id=%s", (project_id,)).fetchone()
-        return JSONResponse({"data": row["data"] if row else {}})
+            conn.execute('INSERT INTO preview_storage(project_id) VALUES(%s) ON CONFLICT DO NOTHING',(project_id,))
+            row = conn.execute("SELECT data,sessions,epoch FROM preview_storage WHERE project_id=%s", (project_id,)).fetchone()
+        return JSONResponse({"data":row['data'] if row else {},'session':row['sessions'].get(session,{}) if row else {},'epoch':str(row['epoch']) if row else None})
     body = await request.body()
     if len(body) > 1_100_000:
         raise HTTPException(413, "预览存储写入过大")
@@ -147,9 +150,22 @@ async def storage(token: str, request: Request):
     if operation == "set" and (not isinstance(value, str) or len(value.encode()) > 1_000_000):
         raise HTTPException(413, "预览存储值过大")
     with connection() as conn:
+        conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,31))',(str(project_id),))
+        if not conn.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s,19)) AS acquired',(str(project_id),)).fetchone()['acquired']:
+            raise HTTPException(409,'正在还原，请等待完成后再修改浏览器数据')
+        project = conn.execute('SELECT status FROM projects WHERE id=%s FOR SHARE',(project_id,)).fetchone()
+        if project['status'] in {'restoring','deleting'}:
+            raise HTTPException(409,'正在还原，请等待完成后再修改浏览器数据')
         conn.execute("INSERT INTO preview_storage(project_id) VALUES(%s) ON CONFLICT DO NOTHING", (project_id,))
-        row = conn.execute("SELECT data FROM preview_storage WHERE project_id=%s FOR UPDATE", (project_id,)).fetchone()
-        data = dict(row["data"])
+        row = conn.execute("SELECT data,sessions,epoch FROM preview_storage WHERE project_id=%s FOR UPDATE", (project_id,)).fetchone()
+        if update.get('epoch')!=str(row['epoch']):
+            raise HTTPException(409,'预览版本已切换，请重新加载应用后再操作')
+        area = update.get('area','local')
+        session = update.get('session','')
+        if area not in {'local','session'} or (area=='session' and (not isinstance(session,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',session))):
+            raise HTTPException(422,'预览存储区域或会话标识无效')
+        sessions=dict(row['sessions'])
+        data = dict(row['data'] if area=='local' else sessions.get(session,{}))
         if operation == "set":
             data[key] = value
         elif operation == "remove":
@@ -158,9 +174,14 @@ async def storage(token: str, request: Request):
             data.clear()
         if len(json.dumps(data, ensure_ascii=False).encode()) > 2_000_000:
             raise HTTPException(413, "预览存储总量超过 2 MB")
-        conn.execute("UPDATE preview_storage SET data=%s,updated_at=NOW() WHERE project_id=%s",
-                     (Jsonb(data), project_id))
-    return {"ok": True}
+        if area=='local':
+            conn.execute("UPDATE preview_storage SET data=%s,updated_at=NOW() WHERE project_id=%s",(Jsonb(data),project_id))
+        else:
+            sessions[session]=data
+            if len(json.dumps(sessions,ensure_ascii=False).encode())>4_000_000:
+                raise HTTPException(413,'预览会话存储总量超过 4 MB')
+            conn.execute("UPDATE preview_storage SET sessions=%s,updated_at=NOW() WHERE project_id=%s",(Jsonb(sessions),project_id))
+    return {'ok':True,'epoch':str(row['epoch'])}
 
 
 @app.get("/health")

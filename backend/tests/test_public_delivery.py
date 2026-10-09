@@ -65,19 +65,16 @@ class PublicApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(error.exception.status_code,422)
             invoke.assert_not_called()
 
-    async def test_existing_runtime_reused_and_cold_runtime_started_before_forwarding(self):
-        token = 'x' * 43
-        for warm in (True, False):
-            status = {'status': {'running': True, 'url': f'/api/runtime/{token}/'}} if warm else {'status': None}
-            invoke = AsyncMock(side_effect=[status, {'mode': 'live', 'url': f'/api/runtime/{token}/'}])
-            forward = AsyncMock(return_value=JSONResponse({'authenticated': True}))
-            project = uuid.uuid4()
-            with patch('main.connection', self.database({'dev_command': 'npm run dev'})), patch('main.agent_invoke', invoke), patch('main.agent_endpoint', return_value='http://agent'), patch('main.forward_http', forward):
-                response = await public_api(project, 'me', self.request('POST'))
-            self.assertEqual(invoke.await_count, 1 if warm else 2)
-            self.assertEqual(forward.call_args.kwargs['project_authorization'], 'Bearer app-token')
-            self.assertEqual(forward.call_args.args[1], f'http://agent/projects/{project}/preview/{token}/api/me')
-            self.assertEqual(response.headers['access-control-allow-origin'], '*')
+    async def test_published_api_never_uses_development_runtime(self):
+        invoke = AsyncMock()
+        forward = AsyncMock(return_value=JSONResponse({'authenticated': True}))
+        project = uuid.uuid4()
+        with patch('main.connection', self.database({'dev_command': 'npm run dev'})), patch('main.agent_invoke', invoke), patch('main.agent_endpoint', return_value='http://agent'), patch('main.forward_http', forward):
+            response = await public_api(project, 'me', self.request('POST'))
+        invoke.assert_not_called()
+        self.assertEqual(forward.call_args.kwargs['project_authorization'], 'Bearer app-token')
+        self.assertEqual(forward.call_args.args[1], f'http://agent/projects/{project}/published/api/me')
+        self.assertEqual(response.headers['access-control-allow-origin'], '*')
 
 
 class PublicBrowserTests(unittest.IsolatedAsyncioTestCase):

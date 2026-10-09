@@ -85,11 +85,14 @@ def worker_database_url(project_id: uuid.UUID):
 
 async def docker(method: str, path: str, payload: dict | None = None):
     transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET)
-    async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=30) as client:
+    # Removing a worker also tears down all service/browser subprocesses.
+    # Docker may finish that cleanup after the old 30-second request deadline.
+    timeout = httpx.Timeout(120 if method == 'DELETE' and path.startswith('/containers/') else 30, connect=5)
+    async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=timeout) as client:
         try:
             response = await client.request(method, path, json=payload)
         except httpx.HTTPError as exc:
-            raise HTTPException(503, f"Docker engine unavailable: {exc}") from exc
+            raise HTTPException(503, f"Docker engine unavailable during {method} {path}: {type(exc).__name__}: {exc}") from exc
     if response.status_code >= 400 and response.status_code != 404:
         raise HTTPException(502, f"Docker engine error: {response.text[:500]}")
     return response
@@ -164,7 +167,7 @@ def project_states():
     with connection() as conn:
         rows = conn.execute("""
             SELECT p.id,p.workspace_path,p.dev_command,s.last_used_at,s.lease_expires_at,s.stopped_at,s.recent_open_count,
-                   EXISTS(SELECT 1 FROM agent_jobs j WHERE j.project_id=p.id AND j.status IN ('queued','running')) AS busy
+                   (p.status='restoring' OR EXISTS(SELECT 1 FROM agent_jobs j WHERE j.project_id=p.id AND j.status IN ('queued','running'))) AS busy
             FROM projects p LEFT JOIN project_runtime_state s ON s.project_id=p.id
         """).fetchall()
     return {row["id"]: row for row in rows}
@@ -207,14 +210,15 @@ async def stop_worker(project_id: uuid.UUID, state: dict | None):
     return False
 
 
-async def remove_worker(project_id: uuid.UUID):
+async def remove_worker(project_id: uuid.UUID, *, preserve_network: bool = False):
     current = await container_for(project_id)
     if current:
         labels = current["Config"].get("Labels") or {}
         if labels.get("atoms.project") != project_id.hex or labels.get("atoms.compose") != COMPOSE_PROJECT:
             raise HTTPException(409, "Container ownership mismatch")
         await docker("DELETE", f"/containers/{worker_name(project_id)}?force=true&v=true")
-    await remove_network(worker_name(project_id))
+    if not preserve_network:
+        await remove_network(worker_name(project_id))
 
 
 async def retire_legacy_workers():
@@ -271,7 +275,7 @@ async def reserve_capacity(project_id: uuid.UUID, creating: bool):
             listed.remove(victim)
 
 
-async def ensure_worker(project_id: uuid.UUID):
+async def ensure_worker(project_id: uuid.UUID, *, allow_idle_upgrade: bool = False, fresh_restore: bool = False):
     async with _capacity_lock:
         async with _project_locks.setdefault(project_id, asyncio.Lock()):
             volume = await docker("GET", f"/volumes/{VOLUME}")
@@ -281,6 +285,21 @@ async def ensure_worker(project_id: uuid.UUID):
             host_path = Path(volume.json()["Mountpoint"]) / relative
             network = await ensure_network(project_id)
             current = await container_for(project_id)
+            if fresh_restore:
+                with connection() as conn:
+                    busy = conn.execute("SELECT 1 FROM agent_jobs WHERE project_id=%s AND status IN ('queued','running')", (project_id,)).fetchone()
+                if busy or record['status'] in {'running', 'queued', 'restoring'}:
+                    raise HTTPException(409, '请等待当前任务或工作区恢复完成')
+                # A version switch never inherits the previous worker process,
+                # runtime tokens, in-memory sessions or container filesystem.
+                # Recreate the application container, keeping shared services
+                # attached. Disconnecting the coordinator/gateway network here
+                # also drops the HTTP connection accepting this restoration.
+                await remove_worker(project_id, preserve_network=True)
+                with connection() as conn:
+                    conn.execute('DELETE FROM runtime_routes WHERE project_id=%s', (project_id,))
+                current = None
+                network = await ensure_network(project_id)
             image = await docker("GET", f"/images/{IMAGE}/json")
             if image.status_code == 404:
                 raise HTTPException(503, "Project worker image is unavailable")
@@ -309,9 +328,12 @@ async def ensure_worker(project_id: uuid.UUID):
                         (project_id,)).fetchall()
                 queued_upgrade = any(row["status"] == "queued" for row in statuses) and not any(
                     row["status"] == "running" for row in statuses)
+                # An explicit build/edit/restore must adopt installed fixes even
+                # while a browser preview lease keeps the idle container warm.
+                queued_upgrade = queued_upgrade or (allow_idle_upgrade and not statuses and record['status'] != 'restoring')
             if obsolete and (queued_upgrade or not (
                     current["State"]["Running"] and protected(project_states().get(project_id)))):
-                await remove_worker(project_id)
+                await remove_worker(project_id, preserve_network=True)
                 current = None
                 network = await ensure_network(project_id)
             mode = "reused" if current and current["State"]["Running"] else "resumed" if current else "restored"
@@ -330,6 +352,7 @@ async def ensure_worker(project_id: uuid.UUID):
                     "AI_MODEL": os.getenv("AI_MODEL", "openai/gpt-6-luna"),
                     "MODEL_LIST_PATH": "/model_list",
                     "PREVIEW_GATEWAY_URL": "http://preview:8002",
+                    "STATE_CHECKPOINT_URL": "http://agent-service:9001",
                     "PROJECT_RSS_LIMIT_MB": os.getenv("PROJECT_RSS_LIMIT_MB", str(max(256, MEMORY_MB - 256))),
                     "PYTHONDONTWRITEBYTECODE": "1", "HOME": "/workspaces",
                 }
@@ -457,6 +480,12 @@ async def reap_loop():
 async def lifespan(_: FastAPI):
     await retire_legacy_workers()
     await reconnect_project_networks()
+    import sys
+    from project_publication import recover_publications, migrate_legacy_publications
+    async def recover_releases():
+        await recover_publications(sys.modules[__name__])
+        await migrate_legacy_publications(sys.modules[__name__])
+    publication_recovery = asyncio.create_task(recover_releases())
     reaper = asyncio.create_task(reap_loop())
     billing_reconciler = asyncio.create_task(reconcile_loop())
     try:
@@ -464,7 +493,11 @@ async def lifespan(_: FastAPI):
     finally:
         reaper.cancel()
         billing_reconciler.cancel()
-        await asyncio.gather(reaper, billing_reconciler, *list(active_requests.values()), return_exceptions=True)
+        from project_publication import tasks as publication_tasks
+        publication_recovery.cancel()
+        for task in list(publication_tasks.values()):
+            task.cancel()
+        await asyncio.gather(reaper, billing_reconciler, publication_recovery, *list(publication_tasks.values()), *list(active_requests.values()), return_exceptions=True)
 
 
 app = FastAPI(title="Atoms Agent Service", lifespan=lifespan)
@@ -541,12 +574,53 @@ async def health():
     return {"ok": True, "role": "agent-service"}
 
 
+_restore_invocation_locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+
 @app.post("/projects/{project_id}/invoke/{operation}")
 async def invoke(project_id: uuid.UUID, operation: str, request: Request, x_agent_secret: str = Header(default="")):
     authorize(x_agent_secret)
     if operation not in {"open", "run", "runtime_start", "runtime_stop", "runtime_status", "command", "build", "restore"}:
         raise HTTPException(404, "Unknown operation")
-    url, mode = await ensure_worker(project_id)
+    if operation == 'restore':
+        # Hold through the ACK: after release the durable status is restoring,
+        # so a duplicate request cannot destroy the newly created worker.
+        async with _restore_invocation_locks.setdefault(project_id, asyncio.Lock()):
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise HTTPException(422, '版本请求格式无效')
+            version = payload.get('version')
+            if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+                raise HTTPException(422, '版本编号无效')
+            with connection() as conn:
+                selected = conn.execute('SELECT runtime_state FROM project_versions WHERE project_id=%s AND version=%s', (project_id, version)).fetchone()
+                if not selected:
+                    raise HTTPException(404, '版本不存在')
+                if not selected['runtime_state'].get('data'):
+                    raise HTTPException(422, '此旧版本没有数据库和浏览器数据快照，无法完整还原；当前代码和数据未修改')
+            # Drain platform writes before tearing down their worker. The
+            # initiating POST holds only the deletion lock, so it cannot
+            # block this exclusive lock. Release after the worker ACK: its
+            # durable restoring status then blocks new mutations until the
+            # background task takes this same lock for the full restoration.
+            with connection() as guard:
+                locked=guard.execute('SELECT pg_try_advisory_lock(hashtextextended(%s,19)) AS acquired',(str(project_id),)).fetchone()['acquired']
+                guard.commit()
+                if not locked:
+                    raise HTTPException(409,'当前仍有文件或数据写入，请等待完成后再还原；工作区未修改')
+                try:
+                    return await invoke_worker(project_id, operation, request, fresh_restore=True)
+                finally:
+                    guard.rollback()
+                    guard.execute('SELECT pg_advisory_unlock(hashtextextended(%s,19))',(str(project_id),))
+    return await invoke_worker(project_id, operation, request)
+
+
+async def invoke_worker(project_id, operation, request, *, fresh_restore=False):
+    options = {'allow_idle_upgrade': operation in {'command', 'build', 'restore'}}
+    if fresh_restore:
+        options['fresh_restore'] = True
+    url, mode = await ensure_worker(project_id, **options)
     if operation == "open":
         return {"ok": True, "mode": mode}
     async with httpx.AsyncClient(timeout=httpx.Timeout(210, read=210)) as client:
@@ -558,13 +632,115 @@ async def invoke(project_id: uuid.UUID, operation: str, request: Request, x_agen
     return Response(response.content, status_code=response.status_code, media_type="application/json")
 
 
+@app.post('/projects/{project_id}/data-checkpoint')
+async def data_checkpoint(project_id: uuid.UUID, request: Request, x_worker_token: str = Header(default='')):
+    if not hmac.compare_digest(x_worker_token, worker_token(project_id)):
+        raise HTTPException(403, 'Invalid project checkpoint credential')
+    with connection() as conn:
+        project = conn.execute('SELECT status FROM projects WHERE id=%s',(project_id,)).fetchone()
+    if not project or project['status']=='deleting':
+        raise HTTPException(404, 'Project unavailable')
+    payload = await request.json()
+    import sys
+    from project_state_snapshots import capture_state, restore_state, verify_state, checked_snapshot
+    try:
+        if payload.get('operation')=='capture':
+            return await capture_state(project_id,sys.modules[__name__])
+        if payload.get('operation')=='validate':
+            with connection() as conn:
+                checked_snapshot(conn,project_id,payload.get('id'))
+            return {'valid':True}
+        if payload.get('operation')=='restore':
+            if project['status']!='restoring':
+                raise HTTPException(409,'数据恢复只能在版本还原过程中执行')
+            return await restore_state(project_id,payload.get('id'),sys.modules[__name__])
+        if payload.get('operation')=='verify':
+            return verify_state(project_id,payload.get('id'),sys.modules[__name__])
+        raise HTTPException(422,'数据快照操作无效')
+    except (ValueError, psycopg.Error) as exc:
+        raise HTTPException(422, str(exc)[:1500]) from exc
+
+
 @app.delete("/projects/{project_id}")
 async def remove_project(project_id: uuid.UUID, x_agent_secret: str = Header(default="")):
     authorize(x_agent_secret)
+    import sys
+    from project_publication import stop_publication
+    await stop_publication(sys.modules[__name__], project_id, delete=True)
     async with _capacity_lock:
         async with _project_locks.setdefault(project_id, asyncio.Lock()):
             await remove_worker(project_id)
     return {"ok": True}
+
+
+@app.post('/projects/{project_id}/publication')
+async def publish_project(project_id: uuid.UUID, request: Request, x_agent_secret: str = Header(default='')):
+    authorize(x_agent_secret)
+    import sys
+    from project_publication import enqueue
+    return await enqueue(sys.modules[__name__], project_id, await request.json())
+
+
+@app.delete('/projects/{project_id}/publication')
+async def unpublish_project(project_id: uuid.UUID, x_agent_secret: str = Header(default='')):
+    authorize(x_agent_secret)
+    import sys
+    from project_publication import stop_publication
+    await stop_publication(sys.modules[__name__], project_id)
+    return {'ok': True}
+
+
+@app.post('/projects/{project_id}/releases/{release_id}/activate')
+async def rollback_publication(project_id: uuid.UUID, release_id: uuid.UUID, x_agent_secret: str = Header(default='')):
+    authorize(x_agent_secret)
+    import sys
+    from project_publication import row, start_release, activate, retire_containers, describe
+    service = sys.modules[__name__]
+    release = row(service, release_id)
+    if not release or release['project_id'] != project_id or release['status'] not in {'retired', 'active'}:
+        raise HTTPException(404, '已验证发布版本不存在')
+    with connection() as guard:
+        if not guard.execute('SELECT pg_try_advisory_lock(hashtextextended(%s,38)) AS locked', (str(project_id),)).fetchone()['locked']:
+            raise HTTPException(409, '已有发布操作正在进行')
+        try:
+            await start_release(service, release)
+            activate(service, release)
+        finally:
+            guard.execute('SELECT pg_advisory_unlock(hashtextextended(%s,38))', (str(project_id),))
+    asyncio.create_task(retire_containers(service, project_id, release_id))
+    return describe(row(service, release_id))
+
+
+@app.api_route('/projects/{project_id}/published/{path:path}', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD'])
+async def published_application(project_id: uuid.UUID, path: str, request: Request, x_agent_secret: str = Header(default='')):
+    authorize(x_agent_secret)
+    import sys
+    from project_publication import active_release, release_name, token
+    service = sys.modules[__name__]
+    release = await active_release(service, project_id)
+    return await forward_http(request,
+        f'http://{release_name(project_id, release["id"])}:9000/application/{quote(path, safe="/")}',
+        {'X-Release-Token': token(service, release['id'])}, project_authorization=request.headers.get('authorization', ''))
+
+
+@app.websocket('/projects/{project_id}/published/{path:path}')
+async def published_socket(socket: WebSocket, project_id: uuid.UUID, path: str):
+    if not hmac.compare_digest(socket.headers.get('x-agent-secret', ''), SECRET):
+        await socket.close(code=1008)
+        return
+    import sys
+    from project_publication import active_release, release_name, token
+    service = sys.modules[__name__]
+    try:
+        release = await active_release(service, project_id)
+    except HTTPException:
+        await socket.close(code=1008)
+        return
+    headers = {'X-Release-Token': token(service, release['id'])}
+    if socket.headers.get('authorization'):
+        headers['Authorization'] = socket.headers['authorization']
+    await forward_websocket(socket,
+        f'ws://{release_name(project_id, release["id"])}:9000/application/{quote(path, safe="/")}', headers)
 
 
 @app.api_route("/projects/{project_id}/preview/{token}/", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])

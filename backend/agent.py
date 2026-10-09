@@ -28,6 +28,7 @@ from agent_session import AgentSession, DIRECTORY as SESSION_DIRECTORY, digest a
 from agent_delivery import DeliveryBudget, DeliveryLimitReached, ExecutionPacing, complexity, DELIVERY_INSTRUCTION
 from verification_policy import INSTRUCTIONS as VERIFICATION_POLICY, command_issue, tool_issue, inspect_sources
 from coding_runtime import ModelContextOverflow, ModelTemporaryError
+from dependency_policy import INSTRUCTIONS as DEPENDENCY_POLICY, repair_guidance
 from billing_context import active_job
 from tool_contract import ToolArgumentError, parse_tool_arguments
 from tool_limits import (SHELL_TIMEOUT_DEFAULT, SHELL_TIMEOUT_MAX, READ_LIMIT_MAX,
@@ -38,9 +39,8 @@ from code_locator import CodeLocator, DISCOVERY_TOOLS, DISCOVERY_NAMES, validate
 
 
 ROOT = Path(os.getenv("WORKSPACE_ROOT", "/workspaces"))
-SKIP_DIRS = {"node_modules", "dist", "published", ".git", ".npm-cache", ".python-packages", ".python-cache", ".local", ".cache", "__pycache__", ".venv", ".atoms-attachments", ".atoms-data", ".atoms-runtime", ".pytest_cache", ".ruff_cache", ".mypy_cache", "coverage", SESSION_DIRECTORY}
+SKIP_DIRS = {"node_modules", "dist", "published", ".git", ".npm-cache", ".python-packages", ".python-cache", ".local", ".cache", "__pycache__", ".venv", "venv", ".atoms-snapshots", ".runtime-python-deps", ".build-tmp", ".atoms-attachments", ".atoms-data", ".atoms-runtime", ".pytest_cache", ".ruff_cache", ".mypy_cache", "coverage", SESSION_DIRECTORY}
 MAX_FILE_BYTES = 120_000
-MAX_SNAPSHOT_BYTES = 25_000_000
 
 
 
@@ -117,7 +117,7 @@ def list_files(root: Path):
         if Path(directory) == root / ".atoms":
             folders[:] = [folder for folder in folders if folder not in {"screenshots", "previews"}]
         for name in files:
-            if name in {".env", "env.connector", ".coverage"} or name.startswith(".env."):
+            if name in {".env", "env.connector", ".coverage"} or name.startswith((".env.", ".atoms-upload-")):
                 continue
             path = Path(directory) / name
             if path.is_file() and path.resolve().is_relative_to(root.resolve()):
@@ -129,8 +129,6 @@ def read_file(root: Path, name: str):
     path = safe_file(root, name)
     if not path.is_file():
         raise ValueError(f"文件不存在: {name}")
-    if path.stat().st_size > MAX_FILE_BYTES:
-        raise ValueError(f"文件过大，不能作为文本读取: {name}")
     try:
         content = path.read_bytes().decode('utf-8')
     except UnicodeDecodeError as exc:
@@ -160,8 +158,9 @@ def read_files(root: Path, files: list[dict]):
                 or not isinstance(limit, int) or isinstance(limit, bool)
                 or not 1 <= limit <= READ_LIMIT_MAX):
             raise ValueError(f'{name} 的 offset/limit 无效')
-        content = read_file(root, name)
-        part = f'{name} [{offset}:{min(offset + limit, len(content))}/{len(content)}]\n{content[offset:offset + limit]}'
+        from project_snapshots import text_page
+        content, total_chars, _ = text_page(safe_file(root, name), offset, limit)
+        part = f'{name} [{offset}:{min(offset + limit, total_chars)}/{total_chars}]\n{content}'
         if total + len(part) > READ_BATCH_CHARS_MAX:
             # parse_tool_arguments normally fits the requested limits first;
             # retain a final guard for long paths/headers so a valid model call
@@ -176,12 +175,21 @@ def read_files(root: Path, files: list[dict]):
     return '\n\n'.join(sections)
 
 
+def session_read_file(session, root, name, offset, limit, messages):
+    path = safe_file(root, name)
+    if path.stat().st_size <= MAX_FILE_BYTES:
+        text = read_file(root, name)
+        from agent_session import inventory
+        return session.read(name, text, offset, limit, messages), inventory({name: text}).get(name)
+    from project_snapshots import text_page
+    part, total, sha = text_page(path, offset, limit)
+    return session.read_range(name, sha, part, total, offset, limit, messages), sha
+
+
 def write_file(root: Path, name: str, content: str):
     path = safe_file(root, name)
     if "\x00" in content:
         raise ValueError("二进制内容不能写入文本文件")
-    if len(content.encode()) > MAX_FILE_BYTES:
-        raise ValueError("文件超过大小限制")
     if path.is_file() and path.read_bytes() == content.encode():
         return f"{name} 内容相同，未重复写入"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,8 +219,8 @@ def write_files(root: Path, files: list[dict]):
             raise ValueError('批量写入目标必须是文件')
         if any(parent.exists() and not parent.is_dir() for parent in path.parents):
             raise ValueError('批量写入目标的父路径不是目录')
-        if path in seen or not isinstance(content, str) or '\x00' in content or len(content.encode()) > MAX_FILE_BYTES:
-            raise ValueError('重复路径、无效文本或超出文件大小限制')
+        if path in seen or not isinstance(content, str) or '\x00' in content:
+            raise ValueError('重复路径或无效文本')
         seen.add(path)
     results = []
     for item in files:
@@ -276,20 +284,8 @@ def read_document(project_id: uuid.UUID, attachment_id: str, offset: int = 0, li
 
 
 def snapshot_files(root: Path):
-    files = {}
-    total = 0
-    for name in list_files(root):
-        content = safe_file(root, name).read_bytes()
-        total += len(content)
-        if total > MAX_SNAPSHOT_BYTES:
-            raise ValueError("项目文件超过版本快照大小限制（25 MB）")
-        try:
-            decoded = content.decode()
-            files[name] = decoded if "\x00" not in decoded and len(content) <= MAX_FILE_BYTES else {
-                "encoding": "base64", "content": base64.b64encode(content).decode()}
-        except UnicodeDecodeError:
-            files[name] = {"encoding": "base64", "content": base64.b64encode(content).decode()}
-    return files
+    from project_snapshots import snapshot
+    return snapshot(root, list_files(root), safe_file)
 
 
 def delivery_fingerprint(root: Path, plan: dict, files: dict, session: AgentSession | None = None) -> str:
@@ -336,18 +332,8 @@ def browser_tool_fingerprint(root: Path, args: dict) -> str:
 
 
 def restore_files(root: Path, files: dict):
-    for name in list_files(root):
-        if name not in files:
-            safe_file(root, name).unlink()
-    for name, content in files.items():
-        if isinstance(content, str):
-            write_file(root, name, content)
-        elif isinstance(content, dict) and content.get("encoding") == "base64":
-            path = safe_file(root, name)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(base64.b64decode(content["content"], validate=True))
-        else:
-            raise ValueError(f"版本文件格式无效: {name}")
+    from project_snapshots import restore
+    restore(root, files, list_files(root), safe_file)
     set_workspace_owner(root, project_uid(uuid.UUID(hex=root.name)))
 
 
@@ -359,7 +345,6 @@ def _drop_privileges(uid: int):
     resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
     resource.setrlimit(resource.RLIMIT_NPROC, (256, 256))
     resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
     # V8 reserves several GiB of virtual address space even for small builds.
     # Limit resident memory through the container instead of RLIMIT_AS.
 
@@ -380,6 +365,8 @@ async def run_command(project_id: uuid.UUID, args: list[str], timeout: int = 120
     env.update(python_environment(root, uid))
     from project_database import environment as database_environment
     env.update(database_environment(project_id))
+    from project_secrets import environment as secret_environment
+    env.update(secret_environment(root, uid))
     process = await asyncio.create_subprocess_exec(*args, cwd=root, env=env,
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         preexec_fn=lambda: _drop_privileges(uid), start_new_session=True)
@@ -414,7 +401,7 @@ async def run_shell(project_id: uuid.UUID, command: str, timeout: int = SHELL_TI
         raise ValueError("timeout 必须是正整数秒")
     timeout = min(timeout, SHELL_TIMEOUT_MAX)
     validate_command(command)
-    return await run_command(project_id, ["/bin/bash", "-o", "pipefail", "-c", command], timeout)
+    return await run_command(project_id, ["/bin/bash", "-e", "-o", "pipefail", "-c", command], timeout)
 
 
 async def scaffold_project(project_id: uuid.UUID, directory: str = "frontend", template: str = "react-ts"):
@@ -724,7 +711,7 @@ class AgentStopped(Exception):
     pass
 
 
-def preferred_context_tokens(model_window):
+def preferred_context_tokens(model_window, complexity_level=None):
     """Choose a useful working window while keeping provider limits authoritative."""
     configured = os.getenv('AGENT_CONTEXT_TOKENS')
     if configured:
@@ -732,6 +719,12 @@ def preferred_context_tokens(model_window):
             return max(4096, int(configured))
         except ValueError:
             pass
+    # Input is paid and processed on every turn. A small change should not
+    # accumulate hundreds of thousands of tokens just because the provider
+    # offers a large window. Full outputs/source versions remain in Session.
+    if complexity_level:
+        return min({'simple': 32000, 'medium': 48000, 'complex': 96000}[complexity_level],
+                   max(4096, model_window - 14000))
     # Long-context models need a coherent multi-file working set. Smaller
     # models receive most of their available window, while the hard provider
     # limit and output reserve remain enforced by the caller.
@@ -752,7 +745,7 @@ async def phase_chat(session, gateway, client, state, messages, tools, phase_nam
     base = preferred_context_tokens(window)
     # Review is a bounded reading phase, not a long execution loop. A larger
     # window prevents clearing observations that the reviewer immediately needs.
-    target = min(window - max_tokens - 2000,
+    target = min(window - min(max_tokens, max(4096, window // 4)) - 2000,
                  max(base * (2 if state == AgentState.REVIEW else 1), estimate_tokens(messages[:2], tools) + 8000))
     trimmed = session.phase_window(messages, target, tools)
     messages[:] = trimmed
@@ -1030,6 +1023,8 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
     job_id = active_job.get()
     saved_budget = session.state.get('delivery_budget') or {}
     same_job = bool(job_id and resume_context and saved_budget.get('job_id') == job_id)
+    if not same_job and session.state.get('execution_progress'):
+        session.state['execution_progress']['stagnant'] = 0
     deadline_at = time.time() + (deadline - time.monotonic())
     if same_job:
         # Automatic retries are one job, not a fresh allocation of tokens,
@@ -1085,17 +1080,8 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
             on_step('warning', '演示收尾预算已用完', detail)
             raise DeliveryLimitReached(detail)
 
-    original_chat = gateway.chat
-    async def bounded_chat(client, state, request_messages, tools=None, **kwargs):
-        guard_delivery()
-        if budget.phase == 'stabilization':
-            remaining = budget.repair_token_limit - budget.repair_tokens
-            available_output = remaining - estimate_tokens(request_messages, tools)
-            if available_output < 512:
-                guard_delivery(reason='request_reserve')
-            kwargs['max_tokens'] = min(kwargs.get('max_tokens') or model_output_limit(gateway.model_for(state), state), available_output)
-        return await original_chat(client, state, request_messages, tools, **kwargs)
-    gateway.chat = bounded_chat
+    from agent_delivery import budgeted_chat
+    gateway.chat = budgeted_chat(gateway, budget, guard_delivery)
     # Keep one stable schema per run, but don't send browser/API/scaffolding
     # definitions to CLI and library jobs that cannot use those capabilities.
     unused = {'scaffold_project', 'runtime_check', 'http_request', 'browser_check'} if ledger.plan['application_type'] in ('cli', 'library', 'artifact') else set()
@@ -1153,8 +1139,9 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
         execution_system = SYSTEM_PROMPT[:SYSTEM_PROMPT.index('Configure .atoms-workspace.json')] + SYSTEM_PROMPT[SYSTEM_PROMPT.index('Repair concrete build'):]
         execution_system += '\nFor CLI/library projects configure actual build/test commands in .atoms-workspace.json; no browser or service is required.\n'
     execution_system += VERIFICATION_POLICY
+    execution_system += DEPENDENCY_POLICY
     execution_system += '\nAcceptance prioritizes actual service startup, working preview and verified core user workflows. Ensure code quality while implementing. Do not perform a separate exhaustive file-by-file source review at acceptance; only inspect code relevant to a concrete observed build/runtime/functional failure and repair it. Preserve all explicit user requirements and real validation evidence. The harness memoizes successful browser checks by source and action fingerprint: after a successful check, do not call the same browser_check again unless source, runtime configuration, or actions changed; continue implementation or update the matching task with the existing V... evidence.\n'
-    execution_system += '\nDemo-first policy: missing external configuration is a TODO, not a job blocker. Complete independent features, implement clearly labeled simulated provider adapters where needed, and use deferred task notes for unresolved parts. The final runnable demo is mandatory; do not claim full production acceptance for simulated or deferred capabilities.\nWhen the harness explicitly enters demo delivery/stabilization, prioritize a genuinely runnable demo and repair its build/runtime/browser failures. Preserve original requirements and evidence; leave unverified tasks open. Full completion rules still apply to COMPLETE, while the harness may separately deliver PREVIEW_READY after actual demo checks. Never claim full acceptance for a demo checkpoint.\n'
+    execution_system += '\nDemo-first policy: automatically fix project-local setup (including auth signing secrets); implement a usable default mock/local adapter for mockable dependencies. Only irreducible configuration for required real services belongs in user configuration TODOs. A missing-config 503 or a TODO alone is not a working mock. Complete independent features and explicitly label simulations; defer only genuinely unresolved scope. The final runnable demo is mandatory; do not claim full production acceptance for simulated or deferred capabilities.\nWhen the harness explicitly enters demo delivery/stabilization, prioritize a genuinely runnable demo and repair its build/runtime/browser failures. Preserve original requirements and evidence; leave unverified tasks open. Full completion rules still apply to COMPLETE, while the harness may separately deliver PREVIEW_READY after actual demo checks. Never claim full acceptance for a demo checkpoint.\n'
     from deliverable_contract import INSTRUCTIONS as deliverable_instructions
     execution_system += deliverable_instructions
     if ledger.plan['application_type'] == 'artifact':
@@ -1197,7 +1184,8 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 f'发现 {len(session.changed)} 个变化文件。保留已完成任务，不重新初始化项目。')
     from model_catalog import catalog
     model_window = next((m['context'] for m in catalog() if m['id'] == model), 128000)
-    context_target = min(preferred_context_tokens(model_window), max(4096, model_window - 132000))
+    context_ceiling = max(4096, model_window - min(32000, model_window // 4) - 4000)
+    context_target = min(preferred_context_tokens(model_window, level), context_ceiling)
 
     async def compact_context(force=False):
         nonlocal messages, prefix_length
@@ -1206,7 +1194,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
         # require meaningful new growth before paying for another summary.
         # The actual model window remains the hard ceiling, including reserve.
         compact_threshold = min(max(context_target, int(session.state.get('compaction_floor', 0)) + 8000),
-                                max(4096, model_window - 132000))
+                                context_ceiling)
         if not force and estimate_tokens(messages, execution_tools) <= compact_threshold:
             return
         before_prune = messages
@@ -1226,7 +1214,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                  '未完成工作、用户补充要求、失败原因和下一步。继承上次摘要仍有效的约束。'
                  '只输出简短摘要，不重复源码或整份任务清单，不编造完成状态，不执行任何工具。'},
                  {'role': 'user', 'content': session.summary_input(messages, ledger, journal)}],
-                max_tokens=model_output_limit(gateway.model_for(AgentState.COMPACT), AgentState.COMPACT)), should_stop)
+                max_tokens=model_output_limit(gateway.model_for(AgentState.COMPACT) if hasattr(gateway, 'model_for') else model, AgentState.COMPACT)), should_stop)
             summary = response.get('content') or summary
         except (AgentStopped, DeliveryLimitReached):
             raise
@@ -1334,14 +1322,19 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 diagnosis_key = session_digest(diagnosis_fingerprint(facts))
                 diagnoses = session.state.setdefault('system_diagnoses', {})
                 if diagnosis_key not in diagnoses:
-                    try:
-                        analysis = await await_or_stop(gateway.chat(client, AgentState.PLAN, [
-                            {'role': 'system', 'content': recovery_prompt(incident)},
-                            {'role': 'user', 'content': json.dumps(facts, ensure_ascii=False)},
-                        ], tools=[], max_tokens=model_output_limit(gateway.model_for(AgentState.PLAN), AgentState.PLAN)), should_stop)
-                        diagnoses[diagnosis_key] = parse_recovery(analysis.get('content') or '')
-                    except (ModelTemporaryError, ModelContextOverflow, ValueError):
-                        diagnoses[diagnosis_key] = None
+                    if not facts['actual_failed_operations'] and not facts['acceptance_gaps']:
+                        diagnoses[diagnosis_key] = {'layer': 'coordinator',
+                            'root_cause': '当前需求没有验收缺口，也没有当前源码的真实失败操作；无需独立模型重新诊断业务。',
+                            'next_actions': ['复用当前成功证据和已完成任务，进入最终构建、启动与交付检查；不要重新扫描或搬移业务目录。']}
+                    else:
+                        try:
+                            analysis = await await_or_stop(gateway.chat(client, AgentState.PLAN, [
+                                {'role': 'system', 'content': recovery_prompt(incident)},
+                                {'role': 'user', 'content': json.dumps(facts, ensure_ascii=False)},
+                            ], tools=[], max_tokens=model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)), should_stop)
+                            diagnoses[diagnosis_key] = parse_recovery(analysis.get('content') or '')
+                        except (ModelTemporaryError, ModelContextOverflow, ValueError):
+                            diagnoses[diagnosis_key] = None
                 result = diagnoses[diagnosis_key]
                 if result:
                     execution_guard.recovery_diagnosed(incident, result)
@@ -1352,7 +1345,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 if len(diagnoses) > 24:
                     diagnoses.pop(next(iter(diagnoses)))
                 session.checkpoint(messages, ledger, journal, snapshot_files(root))
-                messages.append({"role": "user", "content": diagnostic})
+                session.feedback(messages, 'recovery', diagnostic)
                 on_step("result", "正在调整问题解决路径", "检测到重复操作没有推进实现，分析原始错误并切换诊断与修复方法。")
                 # Recovery provides guidance for the next implementation
                 # action; it is not an acceptance boundary. Running the full
@@ -1401,11 +1394,11 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
             availability_error = None
             try:
                 assistant = await await_or_stop(gateway.chat(client, AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT, messages,
-                                                             turn_tools, max_tokens=model_output_limit(gateway.model_for(AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT), AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT)), should_stop)
+                                                             turn_tools, max_tokens=model_output_limit(gateway.model_for(AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT) if hasattr(gateway, 'model_for') else model, AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT)), should_stop)
             except ModelContextOverflow:
                 await compact_context(force=True)
                 assistant = await await_or_stop(gateway.chat(client, AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT, messages,
-                                                             turn_tools, max_tokens=model_output_limit(gateway.model_for(AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT), AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT)), should_stop)
+                                                             turn_tools, max_tokens=model_output_limit(gateway.model_for(AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT) if hasattr(gateway, 'model_for') else model, AgentState.STABILIZE if stabilizing else AgentState.IMPLEMENT)), should_stop)
             except ModelTemporaryError as exc:
                 # Provider availability must not discard working output. Try
                 # a real local delivery check before scheduling recovery.
@@ -1466,20 +1459,18 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                         elif name == "read_files":
                             sections = []
                             for item in args['files']:
-                                file_content = read_file(root, item['path'])
                                 offset = int(item.get('offset', 0))
                                 limit = int(item.get('limit', READ_LIMIT_MAX))
                                 if offset < 0 or not 1 <= limit <= READ_LIMIT_MAX:
                                     raise ValueError(f"{item['path']} 的文件读取范围无效")
-                                sections.append(session.read(item['path'], file_content, offset, limit, messages))
+                                sections.append(session_read_file(session, root, item['path'], offset, limit, messages)[0])
                             result = '\n\n'.join(sections)
                         elif name == "read_file":
-                            file_content = read_file(root, args["path"])
                             offset = int(args.get("offset", 0))
                             limit = int(args.get("limit", 10000))
                             if offset < 0 or not 1 <= limit <= READ_LIMIT_MAX:
                                 raise ValueError("文件读取范围无效")
-                            result = session.read(args['path'], file_content, offset, limit, messages)
+                            result = session_read_file(session, root, args['path'], offset, limit, messages)[0]
                         elif name == "write_file":
                             result = write_file(root, args["path"], args["content"])
                         elif name == 'write_files':
@@ -1542,7 +1533,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                             # explicitly planned contract, then stop probing
                             # endpoint/error matrices. The final startup check
                             # is executed by the harness separately.
-                            if build_tier == 'normal' and ledger.plan['application_type'] == 'web':
+                            if normal_web_mode and not normal_api_required:
                                 probe_count = int(session.state.get('normal_api_checks', 0))
                                 if probe_count >= 1:
                                     code = None
@@ -1635,7 +1626,10 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                             failed_source = source_digest(snapshot_files(root))
                             execution_guard.record(execution_guard.key(name, args, failed_source), name, args, failed_source, code, result)
                             enforce_validation(name, code, result)
-                    if normal_web_mode and name == 'http_request' and code:
+                    from system_contract import configuration_issue
+                    config_issue = (configuration_issue(ledger.evidence, source_digest(snapshot_files(root)), ledger.plan)
+                                    if name == 'http_request' and code else None)
+                    if normal_web_mode and not normal_api_required and name == 'http_request' and code and not config_issue:
                         # API details are deliberately non-blocking in the
                         # normal demo tier. Preserve the failed receipt for
                         # transparency, then clear its recovery trigger so a
@@ -1669,13 +1663,20 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                     messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": session.output(call, result)})
                     journal.append({"tool": name, "input": {key: str(value)[:250] for key, value in args.items() if key not in {"content", "patch", "old", "new"}}, "result": result[:600]})
                     ledger.persist()
-                    from system_contract import confirmed_dependency_blocker, defer_dependency, refresh_deferred_dependencies
-                    refresh_deferred_dependencies(session.state, ledger.evidence, source_digest(snapshot_files(root)))
-                    dependency_blocker = confirmed_dependency_blocker(ledger.evidence, source_digest(snapshot_files(root)))
-                    if dependency_blocker:
-                        if defer_dependency(session.state, dependency_blocker):
-                            recovery_messages.append({'role': 'user', 'content': '该外部配置缺口已记录为 TODO，不停止整个任务。保留真实 provider 接口；为演示提供显式标注 simulated:true 的模拟适配器/结果和 UI 演示提示，继续完成其他页面、上传、额度、错误处理等功能。不要反复探测同一缺配置 503；局部 mock 不冒充真实服务完成。实现演示替代后可 update_task(status="deferred", note="实现/模拟内容及配置 TODO")，推进依赖任务。最后真实启动页面并交付可演示版本。'})
-                            on_step('result', '外部依赖已记入 TODO，继续开发', dependency_blocker['message'] + '；将完成其他功能并提供明确标注的演示替代。')
+                    from system_contract import defer_dependency, refresh_deferred_dependencies
+                    config_source = source_digest(snapshot_files(root))
+                    refresh_deferred_dependencies(session.state, ledger.evidence, config_source, ledger.plan)
+                    config_issue = configuration_issue(ledger.evidence, config_source, ledger.plan)
+                    if config_issue:
+                        key = [config_issue['evidence_id'], config_issue['resolution']]
+                        changed = (session.state.get('configuration_guidance_receipt') != key
+                                   if config_issue['resolution'] == 'auto_configure'
+                                   else defer_dependency(session.state, config_issue))
+                        if changed:
+                            label, guidance = repair_guidance(config_issue)
+                            recovery_messages.append({'role': 'user', 'content': guidance})
+                            on_step('result', label, guidance)
+                        session.state['configuration_guidance_receipt'] = key
                     session.checkpoint(messages, ledger, journal, snapshot_files(root))
                     (ledger.directory / "checkpoint.json").write_text(json.dumps({"tasks": ledger.tasks, "recent_actions": journal[-24:]}, ensure_ascii=False, indent=2))
                     set_workspace_owner(root, project_uid(project_id))
@@ -1697,7 +1698,11 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                         'list_documents', 'read_document', 'read_tool_output', 'get_tasks', 'update_task'} for call in tool_calls)):
                     continue
                 on_step("thinking", "达到阶段检查点，自动验证当前代码", "")
-            last_summary = content.strip() or last_summary
+            # Analysis from an earlier read/implementation turn is not a final
+            # delivery summary. A tool checkpoint can finish without another
+            # model request; use the verified platform summary in that case.
+            if not tool_calls and all(t['status'] == 'done' for t in ledger.tasks):
+                last_summary = content.strip() or last_summary
             if not tool_calls:
                 messages.append({'role': 'assistant', 'content': content})
             session.checkpoint(messages, ledger, journal)
@@ -1708,13 +1713,13 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
                 messages.append({"role": "user", "content": "项目文件尚未发生变化。请读取相关文件并实际完成需求。"})
                 continue
             if any(t['status'] != 'done' for t in ledger.tasks) and not checkpoint_due:
-                messages.append({'role': 'user', 'content': '按当前任务完成实际需求并更新任务；使用已成功且 current_source=true 的验证 ID，无源码变化不要重复验收。completion_issues 是尚需处理的具体事项；不要重复总结。\n' + ledger.model_context(snapshot_files(root))})
+                session.feedback(messages, 'task_gaps', '按当前任务完成实际需求并更新任务；使用已成功且 current_source=true 的验证 ID，无源码变化不要重复验收。completion_issues 是尚需处理的具体事项；不要重复总结。\n' + ledger.model_context(snapshot_files(root)))
                 continue
             drift = conformance_issues(root, ledger.plan, current_files)
             if drift and not stabilizing:
                 enforce_validation('conformance_check', 1, '\n'.join(drift))
-                messages.append({"role":"user", "content":"实现偏离已确定的工程结构，先修复下列具体集成问题，再验收。保持用户完整需求和已有业务：\n"+"\n".join(drift)})
-                on_step("result", "修正工程与计划的一致性", "正在核对实际入口、业务模块和已安装模板，针对偏差修复。")
+                session.feedback(messages, 'conformance', "核对工程配置与计划，保持用户完整需求和已有业务：\n"+"\n".join(drift))
+                on_step("result", "修正工程与计划的一致性", '\n'.join(drift))
                 continue
             on_step("state", AgentState.TEST.value, "系统代码检查、真实构建与启动链路验证")
             inspection_code, inspection_report = inspect_sources(current_files)
@@ -1885,7 +1890,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
             if completion_issues:
                 enforce_validation('completion_check', 1, '\n'.join(completion_issues))
                 on_step("result", "正在补充功能验收", "进一步验证当前需求与实现的一致性。")
-                messages.append({"role": "user", "content": "构建通过并不代表需求完成。尽可能解决以下缺口；难解部分可用 deferred 记录 TODO，继续其他功能并保证最终演示：\n" + "\n".join(completion_issues)})
+                session.feedback(messages, 'completion', "构建通过并不代表需求完成。尽可能解决以下缺口；难解部分可用 deferred 记录 TODO，继续其他功能并保证最终演示：\n" + "\n".join(completion_issues))
                 on_step("state", AgentState.IMPLEMENT.value, "继续完成任务与真实验收")
                 continue
             # Acceptance is grounded in actual build, fresh requirement
@@ -1968,7 +1973,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
     # Keep a normal plan compact in content, while reserving enough completion
     # budget for one complete JSON object instead of an avoidable retry.
     if not phase.get('output_budget') or phase.get('output_budget') in (8000, 12000):
-        phase['output_budget'] = model_output_limit(gateway.model_for(AgentState.PLAN), AgentState.PLAN)
+        phase['output_budget'] = model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)
     if len(phase['messages']) == 2:
         explicit_paths = [path for path in files if path in prompt]
         reused = verified_observations(session, current_sources, preferred_paths=explicit_paths) if baseline else {}
@@ -2020,7 +2025,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
             # one complete JSON handoff.  The old 8k ceiling regularly cut the
             # first plan in half and forced a second model call before any code
             # could be written.  A single larger handoff is faster overall.
-            plan_ceiling = model_output_limit(gateway.model_for(AgentState.PLAN), AgentState.PLAN)
+            plan_ceiling = model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)
             response = await phase_chat(session, gateway, client, AgentState.PLAN, messages, active_tools, 'planning', phase,
                                         min(plan_ceiling,
                                             int(phase.get('output_budget', plan_ceiling))))
@@ -2043,23 +2048,22 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
                         elif name == 'read_files':
                             sections = []
                             for item in args['files']:
-                                text = read_file(root, item['path'])
                                 offset, limit = int(item.get('offset', 0)), int(item.get('limit', READ_LIMIT_MAX))
                                 if offset < 0 or not 1 <= limit <= READ_LIMIT_MAX:
                                     raise ValueError(f"{item['path']} 的文件读取范围无效")
-                                sections.append(session.read(item['path'], text, offset, limit, messages))
+                                rendered, sha = session_read_file(session, root, item['path'], offset, limit, messages)
+                                sections.append(rendered)
                                 phase['observations'][item['path'] + ':' + str(offset)] = {
-                                    'path': item['path'], 'sha': inventory({item['path']: text}).get(item['path']),
+                                    'path': item['path'], 'sha': sha,
                                     'text': sections[-1]}
                             result = '\n\n'.join(sections)
                         elif name == 'read_file':
                             offset, limit = int(args.get('offset', 0)), int(args.get('limit', 6000))
                             if offset < 0 or not 1 <= limit <= READ_LIMIT_MAX:
                                 raise ValueError('无效的读取范围')
-                            text = read_file(root, args['path'])
-                            result = session.read(args['path'], text, offset, limit, messages)
+                            result, sha = session_read_file(session, root, args['path'], offset, limit, messages)
                             phase['observations'][args['path'] + ':' + str(offset)] = {
-                                'path': args['path'], 'sha': inventory({args['path']: text}).get(args['path']), 'text': result}
+                                'path': args['path'], 'sha': sha, 'text': result}
                         elif name == 'search_files':
                             result = search_files(root, args['query'])
                         elif name == 'symbol_search':
@@ -2092,7 +2096,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
             text = response.get('content') or ''
             try:
                 if phase['last_response_meta'].get('finish_reason') == 'length':
-                    phase['output_budget'] = model_output_limit(gateway.model_for(AgentState.PLAN), AgentState.PLAN)
+                    phase['output_budget'] = model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)
                     raise ValueError('计划输出达到长度限制；缩短重复设计描述，直接提交完整 JSON。下一次将使用模型阶段上限')
                 value = resolve_default_plan(plan_object(text), prompt, history, new_project=new_project)
                 plan = stamp_tools(stamp_plan(assemble_plan(value, baseline), build_tier), enabled_tools)

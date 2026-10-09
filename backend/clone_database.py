@@ -2,24 +2,31 @@
 import json
 import re
 import uuid
+from contextlib import nullcontext
 from urllib.parse import quote, urlsplit
 from psycopg import sql
 from project_database import names
 from project_clone import unpack_docker_stream
 
-async def clone_database(source, target, connection, docker, compose_project, database_url, include_data):
+async def clone_database(source, target, connection, docker, compose_project, database_url, include_data, *, target_names=None, source_schema=None, destination_connection=None, prepare=None, read_source=None, finalize=None):
     source, target = uuid.UUID(str(source)), uuid.UUID(str(target))
-    source_schema, _ = names(source)
-    target_schema, target_role = names(target)
+    source_schema = source_schema or names(source)[0]
+    target_schema, target_role = target_names or names(target)
     filters = quote(json.dumps({'label': [f'com.docker.compose.project={compose_project}', 'com.docker.compose.service=db']}))
     containers = (await docker('GET', f'/containers/json?filters={filters}')).json()
     if len(containers) != 1:
         raise ValueError('无法定位托管 PostgreSQL 服务')
     parsed = urlsplit(database_url)
-    with connection() as original, connection() as destination:
+    with connection() as original, (nullcontext(destination_connection) if destination_connection else connection()) as destination:
         original.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        if read_source:
+            read_source(original)
+        if prepare:
+            prepare(destination)
         exists = original.execute('SELECT 1 FROM pg_namespace WHERE nspname=%s', (source_schema,)).fetchone()
         if not exists:
+            if finalize:
+                finalize(destination)
             return {'tables': 0, 'rows': 0}
         # Foreign schema dependencies would make a clone share data with the original.
         dependencies = original.execute('''SELECT 1 FROM pg_depend d JOIN pg_class c ON d.objid=c.oid
@@ -36,7 +43,7 @@ async def clone_database(source, target, connection, docker, compose_project, da
             response = await docker('POST', f'/exec/{execution}/start', {'Detach': False, 'Tty': False})
             status = (await docker('GET', f'/exec/{execution}/json')).json()
             output, _ = unpack_docker_stream(response.content)
-            if status.get('ExitCode') != 0 or len(output) > 32*1024*1024:
+            if status.get('ExitCode') != 0:
                 raise ValueError('PostgreSQL 数据库结构导出失败')
             text = output.decode().replace(source_schema, target_schema)
             text = '\n'.join(line for line in text.splitlines() if not line.startswith('\\') and not line.startswith(f'CREATE SCHEMA {target_schema};'))
@@ -45,7 +52,7 @@ async def clone_database(source, target, connection, docker, compose_project, da
         destination.execute(sql.SQL('SET LOCAL ROLE {}').format(sql.Identifier(target_role)))
         await ddl('pre-data')
         tables = original.execute('''SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname=%s AND c.relkind='r' AND NOT c.relispartition ORDER BY c.relname''', (source_schema,)).fetchall()
+            WHERE n.nspname=%s AND c.relkind IN ('r','p') AND NOT c.relispartition ORDER BY c.relname''', (source_schema,)).fetchall()
         row_count = 0
         if include_data:
             for table in tables:
@@ -55,7 +62,7 @@ async def clone_database(source, target, connection, docker, compose_project, da
                 if not columns:
                     continue
                 column_sql = sql.SQL(',').join(sql.Identifier(item['attname']) for item in columns)
-                with original.cursor().copy(sql.SQL('COPY {}.{} ({}) TO STDOUT (FORMAT BINARY)').format(sql.Identifier(source_schema),sql.Identifier(name),column_sql)) as read:
+                with original.cursor().copy(sql.SQL('COPY (SELECT {} FROM {}.{}) TO STDOUT (FORMAT BINARY)').format(column_sql,sql.Identifier(source_schema),sql.Identifier(name))) as read:
                     with destination.cursor().copy(sql.SQL('COPY {}.{} ({}) FROM STDIN (FORMAT BINARY)').format(sql.Identifier(target_schema),sql.Identifier(name),column_sql)) as write:
                         for chunk in read:
                             write.write(chunk)
@@ -66,4 +73,8 @@ async def clone_database(source, target, connection, docker, compose_project, da
                 state = original.execute(sql.SQL('SELECT last_value,is_called FROM {}.{}').format(sql.Identifier(source_schema),sql.Identifier(name))).fetchone()
                 destination.execute('SELECT setval(%s::regclass,%s,%s)', (f'{target_schema}.{name}',state['last_value'],state['is_called']))
         await ddl('post-data')
+        if finalize:
+            destination.execute('RESET ROLE')
+            destination.execute('SET LOCAL search_path TO public, pg_catalog')
+            finalize(destination)
         return {'tables': len(tables), 'rows': row_count}

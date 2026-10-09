@@ -3,14 +3,22 @@ import { Check, ChevronDown, Copy, ExternalLink, Globe2, LoaderCircle, ShieldChe
 import './publish-dialog.css'
 import { copyLink } from './clipboard'
 
-export default function PublishDialog({ url, published, busy, success, canPublish, error, onPublish, onUnpublish, onShare, onClose }: {
+export type PublishedRelease = { id: string; version: number; status: string; phase: string; error: string; created_at: string; activated_at: string | null }
+export type PublishVersion = { version: number; summary: string; created_at: string }
+
+export default function PublishDialog({ url, published, busy, success, canPublish, error, phase, versions = [], versionsLoading = false, releases = [], onRollback, onPublish, onUnpublish, onShare, onClose }: {
   url: string; published: boolean; busy: boolean; success: boolean; canPublish: boolean; error: string;
-  onPublish: () => void; onUnpublish: () => void; onShare: () => void; onClose: () => void;
+  onPublish: (version: number) => void; onUnpublish: () => void; onShare: () => void; onClose: () => void;
+  versions?: PublishVersion[]; versionsLoading?: boolean;
+  phase?: string; releases?: PublishedRelease[]; onRollback?: (id: string) => void;
 }) {
   useEffect(() => { const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }; document.addEventListener('keydown', escape); return () => document.removeEventListener('keydown', escape) }, [busy, onClose])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState('')
+  const [versionChoice, setVersionChoice] = useState('latest')
+  const selectedVersion = versionChoice === 'latest' ? versions[0]?.version : Number(versionChoice)
+  const versionAvailable = versions.some(version => version.version === selectedVersion)
   const copy = async () => {
     try { await copyLink(url); setCopied(true); setCopyError('') }
     catch (error) { setCopied(false); setCopyError((error as Error).message) }
@@ -29,15 +37,23 @@ export default function PublishDialog({ url, published, busy, success, canPublis
         {published && <div className="publish-online-row"><strong>应用状态</strong><span className="publish-online-badge">● 在线</span></div>}
         <label className="publish-dialog-label" htmlFor="deployment-url">你的网站 URL</label>
         <div className="publish-dialog-url"><input id="deployment-url" readOnly value={url} /><button aria-label={copied ? '链接已复制' : '复制链接'} disabled={!published || busy} onClick={() => void copy()}>{copied ? <Check size={17} /> : <Copy size={17} />}</button></div>
+        <div className="publish-version-picker">
+          <label className="publish-dialog-label" htmlFor="deployment-version">发布版本</label>
+          <select id="deployment-version" value={versionChoice} disabled={busy || versionsLoading || !versions.length} onChange={event => setVersionChoice(event.target.value)}>
+            <option value="latest">{versionsLoading ? '正在加载版本…' : versions.length ? `最新版本 · 版本 ${versions[0].version}` : '暂无可发布版本'}</option>
+            {versions.slice(1).map(version => <option key={version.version} value={version.version}>版本 {version.version}{version.summary ? ` · ${version.summary.slice(0, 60)}` : ''}</option>)}
+          </select>
+          <p>发布所选构建版本。继续构建不影响线上版本。</p>
+        </div>
         <div className="publish-settings">
           <button className="publish-settings-toggle" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(!settingsOpen)}><strong>设置</strong><ChevronDown size={19} className={settingsOpen ? 'expanded' : ''} /></button>
-          {settingsOpen && <div className="publish-settings-body"><div><span><Globe2 size={17} />发布资源存储</span><strong>MinIO</strong></div><p>发布构建资源后，访问此链接即可打开网站。</p>{published && <button className="publish-offline-button" disabled={busy} onClick={onUnpublish}>停止公开访问</button>}</div>}
+          {settingsOpen && <div className="publish-settings-body"><div><span><Globe2 size={17} />运行环境</span><strong>独立发布环境</strong></div><p>发布完整应用版本，继续构建不会改变线上应用。更新通过启动检查后切换，线上数据持续保留。</p>{releases.filter(release => ['active', 'retired'].includes(release.status)).map(release => <div key={release.id}><span>版本 {release.version} · {release.status === 'active' ? '当前上线' : '历史发布'}</span>{release.status === 'retired' && onRollback && <button disabled={busy} onClick={() => onRollback(release.id)}>恢复此版本</button>}</div>)}{published && <button className="publish-offline-button" disabled={busy} onClick={onUnpublish}>停止公开访问</button>}</div>}
         </div>
-        {!canPublish && !busy && <p className="publish-dialog-message">请等待项目构建完成后发布。</p>}
+        {(!canPublish || !versionAvailable) && !busy && !versionsLoading && <p className="publish-dialog-message">暂无可发布版本，请先完成一次构建。</p>}
         {error && <p className="publish-dialog-error" role="alert">{error}</p>}
         <div className="publish-dialog-footer">
-          {busy ? <span className="publish-progress" role="status"><LoaderCircle size={19} className="publish-spin" />正在上传资源</span> : published ? <button className="publish-dialog-secondary" onClick={onShare}>分享</button> : <span className="publish-progress"><ShieldCheck size={19} />准备发布</span>}
-          <button className="publish-dialog-primary" disabled={!canPublish || busy} onClick={onPublish}>{busy ? <><LoaderCircle size={18} className="publish-spin" />正在发布</> : published ? '更新发布' : '发布'}</button>
+          {busy ? <span className="publish-progress" role="status"><LoaderCircle size={19} className="publish-spin" />{phase || '正在准备独立发布环境'}</span> : published ? <button className="publish-dialog-secondary" onClick={onShare}>分享</button> : <span className="publish-progress"><ShieldCheck size={19} />准备发布</span>}
+          <button className="publish-dialog-primary" disabled={!canPublish || !versionAvailable || versionsLoading || busy} onClick={() => { if (selectedVersion) onPublish(selectedVersion) }}>{busy ? <><LoaderCircle size={18} className="publish-spin" />正在发布</> : published ? '更新发布' : '发布'}</button>
         </div>
       </>}
       {copyError && <p className="publish-dialog-error" role="alert">{copyError}</p>}

@@ -29,6 +29,24 @@ async def receive():
 
 
 class PreviewFullstackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gateway_replaces_legacy_worker_diagnostics_before_application_scripts(self):
+        from preview_diagnostics import PREVIEW_DIAGNOSTICS
+        for old in (PREVIEW_DIAGNOSTICS, """<script>(() => {
+          const send = (level, message) => parent.postMessage({type:'atoms-preview-console'}, '*');
+          setTimeout(() => console.error('应用未挂载'), 4000);
+        })();</script>"""):
+            async def upstream(request_scope, receive, send):
+                await send({'type':'http.response.start','status':200,'headers':[(b'content-type',b'text/html; charset=utf-8')]})
+                await send({'type':'http.response.body','body':('<head><script>window.application=true</script></head><body><div id="root"></div>'+old+'</body>').encode()})
+            messages = []
+            async def send(message): messages.append(message)
+            await PreviewHeaders(upstream)(scope(), receive, send)
+            html = messages[-1]['body'].decode()
+            self.assertEqual(html.count('data-atoms-preview-diagnostics'), 1)
+            self.assertNotIn('应用未挂载', html)
+            self.assertLess(html.index('data-atoms-preview-diagnostics'), html.index('window.application=true'))
+            self.assertLess(html.index('Storage compatibility') if 'Storage compatibility' in html else html.index('const sessionScope'), html.index('data-atoms-preview-diagnostics'))
+
     async def test_gateway_preparation_rejects_foreign_credentials_and_stale_runtime(self):
         from fastapi import HTTPException
         with patch.dict(os.environ, {'DATABASE_URL':os.getenv('DATABASE_URL','postgresql://unused')}):
@@ -201,6 +219,36 @@ class PreviewFullstackTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('authorization', observed[0])
         self.assertEqual(observed[1]['authorization'], 'Bearer project-token')
         self.assertTrue(all('cookie' not in headers for headers in observed))
+
+    async def test_upload_stream_reaches_upstream_without_preloading_request(self):
+        chunks = [b'first upload chunk', b'second upload chunk', b'last upload chunk']
+        consumed = 0
+        async def upload_receive():
+            nonlocal consumed
+            chunk = chunks[consumed]
+            consumed += 1
+            return {'type': 'http.request', 'body': chunk, 'more_body': consumed < len(chunks)}
+
+        test = self
+        class UploadTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                test.assertEqual(consumed, 0, 'The gateway buffered the upload before forwarding it')
+                test.assertEqual(request.headers['content-length'], str(sum(map(len, chunks))))
+                test.assertNotIn('cookie', request.headers)
+                received = b''
+                async for chunk in request.stream:
+                    received += chunk
+                test.assertEqual(received, b''.join(chunks))
+                return httpx.Response(200, content=b'uploaded')
+
+        request_scope = scope('POST')
+        request_scope['headers'].append((b'content-length', str(sum(map(len, chunks))).encode()))
+        original_client = httpx.AsyncClient
+        with patch('service_proxy.httpx.AsyncClient', side_effect=lambda **kwargs: original_client(transport=UploadTransport())):
+            response = await forward_http(Request(request_scope, upload_receive), 'http://worker/api/upload', {})
+            body = b''.join([chunk async for chunk in response.body_iterator])
+        self.assertEqual(body, b'uploaded')
+        self.assertEqual(consumed, len(chunks))
 
 
 if __name__ == '__main__':

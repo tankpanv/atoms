@@ -98,7 +98,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             (root/'greet.py').write_text('print("hello")\n');(root/'README.md').write_text('Existing implementation')
             (root/'.atoms-workspace.json').write_text('{"build":"echo actual-build-check","test":"python greet.py"}')
             (root/'package.json').write_text('{}')
-            plan=cli_plan();plan['application_type']='web'
+            plan=cli_plan();plan['application_type']='web';plan['build_tier']='deep'
             with patch('agent.ensure_workspace',return_value=root),patch('agent.project_uid',return_value=os.getuid()),patch('agent.ModelGateway',Gateway),patch('runtime.start_runtime',AsyncMock(return_value=object())),patch('agent_checks.browser_check',AsyncMock(return_value=(0,'{"text":"Actual product","rendered_elements":4}'))):
                 result=await run_agent(uuid.UUID(hex=root.name),'Verify existing product','test',lambda kind,label,*args,**kwargs:states.append(label) if kind=='state' else None,plan=json.dumps(plan))
             self.assertNotEqual(result.get('verification'),'runtime_and_rendering')

@@ -157,6 +157,12 @@ class ExecutionGuard:
         self.progress['stagnant'] = self.progress.get('stagnant', 0) + 1 if same else 0
         self.progress['fingerprint'] = current
         stagnant = self.progress['stagnant']
+        # Recovery prompts alone are not progress. Several opportunities to
+        # inspect, probe and repair must eventually yield a concrete result.
+        if stagnant >= 18:
+            from agent_delivery import DeliveryLimitReached
+            raise DeliveryLimitReached('连续 18 轮没有源码变化、任务状态变化或新的需求成功验证，已停止无进展循环并保存检查点。'
+                                       + self.diagnostic(source))
         return bool(self.limits.get('pending_recovery')) or stagnant in (3, 6, 10) or (stagnant > 10 and (stagnant - 10) % 3 == 0)
 
     def failures(self, source=None):

@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from websockets.asyncio.client import connect as websocket_connect
 
 
-HOP_HEADERS = {"host", "connection", "content-length", "transfer-encoding", "cookie", "authorization", "origin", "x-agent-secret", "x-worker-token"}
+HOP_HEADERS = {"host", "connection", "content-length", "transfer-encoding", "cookie", "authorization", "origin", "x-agent-secret", "x-worker-token", "x-release-token"}
 
 
 async def forward_http(request: Request, target: str, headers: dict[str, str], *, project_authorization: str = ""):
@@ -20,9 +20,17 @@ async def forward_http(request: Request, target: str, headers: dict[str, str], *
     forwarded.update(headers)
     if project_authorization:
         forwarded["authorization"] = project_authorization
+    # Preserve the known size while streaming, including for applications that
+    # do not accept chunked requests. Never buffer a complete upload per hop.
+    if request.headers.get('content-length'):
+        forwarded['content-length'] = request.headers['content-length']
+    has_body = (request.method not in {'GET', 'HEAD'} or
+                request.headers.get('content-length', '0') != '0' or
+                bool(request.headers.get('transfer-encoding')))
     client = httpx.AsyncClient(timeout=httpx.Timeout(60, read=None), follow_redirects=False)
     try:
-        upstream = await client.send(client.build_request(request.method, target, headers=forwarded, content=await request.body()), stream=True)
+        upstream = await client.send(client.build_request(request.method, target, headers=forwarded,
+            content=request.stream() if has_body else None), stream=True)
     except httpx.HTTPError as exc:
         await client.aclose()
         raise HTTPException(502, f"Agent service unavailable: {exc}") from exc

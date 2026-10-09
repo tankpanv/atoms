@@ -177,7 +177,8 @@ def validate_plan(plan: dict) -> dict:
 
 
 def source_digest(files: dict) -> str:
-    source = {name: value for name, value in files.items()
+    from agent_session import inventory
+    source = {name: value for name, value in inventory(files).items()
               if not name.startswith(".atoms/") and not name.endswith("tsconfig.tsbuildinfo")}
     return hashlib.sha256(json.dumps(source, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 

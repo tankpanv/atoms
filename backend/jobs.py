@@ -119,6 +119,14 @@ def init_jobs_db(conn):
             PRIMARY KEY(project_id,version)
         )
     """)
+    conn.execute("ALTER TABLE project_versions ADD COLUMN IF NOT EXISTS runtime_state JSONB NOT NULL DEFAULT '{}'::jsonb")
+    conn.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS restoration JSONB")
+    conn.execute("""CREATE TABLE IF NOT EXISTS project_restores (
+        project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        id UUID NOT NULL, version INTEGER NOT NULL, status TEXT NOT NULL,
+        phase TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '',
+        result JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
 
 
 def timestamp(value):
@@ -129,6 +137,8 @@ def enqueue_project(conn, project_id: uuid.UUID, prompt: str, model: str, messag
     current = conn.execute("SELECT status,build_tier,enabled_tools FROM projects WHERE id=%s FOR UPDATE", (project_id,)).fetchone()
     if not current or current['status'] == 'deleting':
         raise ValueError('项目正在删除或已不存在')
+    if current['status'] == 'restoring':
+        raise ValueError('正在还原版本，请等待完成后再提交任务')
     if expert_ids is None:
         row = conn.execute("SELECT expert_ids FROM projects WHERE id=%s", (project_id,)).fetchone()
         expert_ids = row["expert_ids"] if row else []
@@ -201,7 +211,7 @@ def list_jobs(project_id: uuid.UUID):
 
 def list_versions(project_id: uuid.UUID):
     with connection() as conn:
-        rows = conn.execute("SELECT project_id,version,summary,created_at FROM project_versions WHERE project_id=%s ORDER BY version DESC", (project_id,)).fetchall()
+        rows = conn.execute("SELECT project_id,version,summary,created_at,(runtime_state->'data'->>'id') IS NOT NULL AS data_snapshot FROM project_versions WHERE project_id=%s ORDER BY version DESC", (project_id,)).fetchall()
     return [{**row, "project_id": str(row["project_id"]), "created_at": timestamp(row["created_at"])} for row in rows]
 
 
@@ -221,37 +231,9 @@ def stop_job(project_id: uuid.UUID, job_id: uuid.UUID):
     return row["status"]
 
 
-async def restore_version(project_id: uuid.UUID, version: int):
-    with connection() as conn:
-        row = conn.execute("SELECT files,preview_html FROM project_versions WHERE project_id=%s AND version=%s", (project_id, version)).fetchone()
-    if not row:
-        raise ValueError("版本不存在")
-    root = ensure_workspace(project_id)
-    # Validate the entire checkpoint before deleting or writing any current file.
-    from agent import safe_file
-    import base64
-    for name, content in row["files"].items():
-        safe_file(root, name)
-        if isinstance(content, str):
-            if "\x00" in content:
-                raise ValueError(f"版本文本包含 NUL: {name}")
-        elif isinstance(content, dict) and content.get("encoding") == "base64":
-            base64.b64decode(content["content"], validate=True)
-        else:
-            raise ValueError(f"版本文件格式无效: {name}")
-    from runtime import stop_runtime
-    await stop_runtime(project_id)
-    restore_files(root, row["files"])
-    code, output = await run_build(project_id)
-    if code:
-        raise ValueError("还原后构建失败: " + output[-800:])
-    preview = preview_document(root) or row["preview_html"]
-    with connection() as conn:
-        conn.execute("UPDATE projects SET preview_html=%s,dev_command='',status='ready',updated_at=NOW() WHERE id=%s", (preview, project_id))
-        next_version = conn.execute("SELECT COALESCE(MAX(version),0)+1 AS n FROM project_versions WHERE project_id=%s", (project_id,)).fetchone()["n"]
-        conn.execute("INSERT INTO project_versions(project_id,version,summary,files,preview_html) VALUES(%s,%s,%s,%s,%s)",
-                     (project_id, next_version, f"还原版本 {version}", Jsonb(row["files"]), preview))
-    return next_version
+async def restore_version(project_id: uuid.UUID, version: int, progress=lambda phase: None):
+    from project_restoration import restore_version as restore
+    return await restore(project_id, version, progress)
 
 
 async def process_project_queue(project_id: uuid.UUID):
@@ -402,13 +384,19 @@ async def process_project_queue(project_id: uuid.UUID):
                 # pass. Promote that check's screenshot to the durable cover
                 # used by project cards and profile views.
                 promote_demo_cover(ensure_workspace(project_id))
+                from project_restoration import capture_version_state
+                from agent import snapshot_files
+                version_files = snapshot_files(ensure_workspace(project_id))
                 with connection() as conn:
-                    current = conn.execute("SELECT status FROM projects WHERE id=%s FOR UPDATE", (project_id,)).fetchone()
+                    current_command = conn.execute('SELECT dev_command FROM projects WHERE id=%s',(project_id,)).fetchone()['dev_command']
+                runtime_state = await capture_version_state(project_id,ensure_workspace(project_id),current_command)
+                with connection() as conn:
+                    current = conn.execute("SELECT status,dev_command FROM projects WHERE id=%s FOR UPDATE", (project_id,)).fetchone()
                     if not current or current['status'] == 'deleting':
                         return
                     next_version = conn.execute("SELECT COALESCE(MAX(version),0)+1 AS n FROM project_versions WHERE project_id=%s", (project_id,)).fetchone()["n"]
-                    conn.execute("INSERT INTO project_versions(project_id,version,summary,files,preview_html) VALUES(%s,%s,%s,%s,%s)",
-                                 (project_id, next_version, result["summary"][:1000], Jsonb(result["files"]), result["preview_html"]))
+                    conn.execute("INSERT INTO project_versions(project_id,version,summary,files,preview_html,runtime_state) VALUES(%s,%s,%s,%s,%s,%s)",
+                                 (project_id, next_version, result["summary"][:1000], Jsonb(version_files), result["preview_html"], Jsonb(runtime_state)))
                     conn.execute("UPDATE projects SET preview_html=%s,model=%s,status='ready',updated_at=NOW() WHERE id=%s AND status<>'deleting'", (result["preview_html"], job["model"], project_id))
                     conn.execute("INSERT INTO messages(id,project_id,role,agent,content,build_tier) VALUES(%s,%s,'assistant','Alex',%s,%s)",
                                  (uuid.uuid4(), project_id, result["summary"], job.get("build_tier", "normal")))

@@ -143,6 +143,7 @@
 .build-viewer-bar .build-console-link{margin-left:auto;display:flex;align-items:center;gap:5px;width:auto;white-space:nowrap;color:#222}
 .build-viewer-body{position:relative;display:flex;justify-content:center;flex:1;min-height:0;background:#fff}
 .build-viewer-body iframe{width:100%;height:100%;border:0;background:#fff}
+.build-preview-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;background:#fffc;color:#777;font-size:14px}
 .build-viewer-body.mobile{background:#efefef;padding:14px}
 .build-viewer-body.mobile iframe{max-width:390px;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 16px #0002}
 .build-preview-empty{align-self:center;text-align:center;color:#888}
@@ -317,3 +318,11 @@
 @media(max-width:950px){.build-header,.build-content{grid-template-columns:42% minmax(0,1fr)}.build-page.chat-hidden .build-header{grid-template-columns:42% minmax(0,1fr)}.build-file-panel{width:180px}.build-tool-tabs button.active span{display:none}.build-actions .build-follow{display:none}}
 @media(max-width:680px){.build-header,.build-content{grid-template-columns:minmax(0,1fr)}.build-header{height:auto;display:flex;flex-wrap:wrap}.build-header-left,.build-header-right{width:100%}.build-header-right{height:40px}.build-content{display:flex;flex-direction:column}.build-chat{height:45%;flex:none}.build-workspace{flex:1;margin:0 7px 7px}.build-file-panel{width:145px}.build-page.chat-hidden .build-header-left{width:100%}.build-page.chat-hidden .build-header-right{padding-left:8px}.build-user-row{margin-bottom:22px}.build-feed{padding:8px 12px}.build-compose{height:100px}.build-actions .build-share{display:none}}
 .build-session-memory{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:11px;padding:4px 2px 8px;line-height:1.5}
+
+.build-restoration-card { margin-top: 14px; padding: 16px 18px; border-radius: 14px; background: #e9edff; color: #303b69; }
+.build-restoration-card strong { display: block; margin-bottom: 10px; }
+.build-restoration-card > div { margin: 5px 0; font-size: 13px; }
+.build-restoration-card p { margin: 12px 0 0; font-size: 13px; }
+.build-restoration-card button { margin-top: 12px; border: 0; background: transparent; color: #4862dc; cursor: pointer; }
+.build-restoration-card[data-restore-status="failed"] { background: #fff0e7; color: #92411e; }
+.build-restoration-card[data-restore-status="succeeded"] { background: #e8f4ee; color: #27634b; }

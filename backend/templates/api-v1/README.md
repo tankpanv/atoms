@@ -13,7 +13,7 @@
 在平台连接器页面下载本项目 env.connector 放到项目根目录；在同一平台 Docker 主机安装 Docker Compose 后运行 `sh deploy.sh`，访问 http://127.0.0.1:23871。脚本自动接入现有项目数据库网络，只启动应用容器。不要提交 env.connector（含本项目专属连接凭据）。
 用 `APP_PORT=其他端口 sh deploy.sh` 更改端口；`APP_BIND_ADDRESS=0.0.0.0 sh deploy.sh` 对外提供服务。
 `docker compose -f compose.yaml logs -f` 查看日志；`docker compose -f compose.yaml down` 停止。
-完整前后端使用上述 Docker 部署，同源提供页面与 /api；数据库始终使用现有平台连接器，不创建数据库容器或本地卷。独立部署先配置 APP_DATABASE_URL/APP_DATABASE_SCHEMA 为本项目连接信息，地址必须可从部署机器访问；数据保存在平台项目 Schema，重建应用不会清空。平台 MinIO 发布只上传静态资源，不部署后端。
+完整前后端使用上述 Docker 部署，同源提供页面与 /api；数据库始终使用现有平台连接器，不创建数据库容器或本地卷。独立部署先配置 APP_DATABASE_URL/APP_DATABASE_SCHEMA 为本项目连接信息，地址必须可从部署机器访问；数据保存在平台项目 Schema，重建应用不会清空。平台发布会归档完整应用镜像，启动独立发布容器并使用独立生产数据库；后续开发构建不会改变已发布前后端。
 
 ## 本地全栈开发
 后端 `python -m uvicorn backend.app.main:app --port 8000`；另一终端 `API_PORT=8000 npm run dev`。平台预览自动启动两者，无需手动配端口。`python -m unittest discover -s backend/tests -v` 检查数据库持久化与事务；业务仍需新增实际测试。

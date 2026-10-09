@@ -20,8 +20,6 @@ def artifacts(root: Path) -> list[dict]:
             if not path.resolve().is_relative_to(output.resolve()) or path.stat().st_size == 0:
                 continue
             entries.append({'path':str(path.relative_to(root)), 'name':name, 'size':path.stat().st_size})
-            if len(entries)>=100:
-                return entries
     return entries
 
 

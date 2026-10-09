@@ -129,7 +129,7 @@ class SessionTests(unittest.TestCase):
         assets = {**self.files, 'hero.png': {'encoding': 'base64', 'content': 'iVBORw=='}}
         session, _, _ = self.start(files=assets)
         self.assertIn('hero.png', session.state['files'])
-        _, messages, _ = self.start(AgentSession(self.root), {**self.files, 'hero.png': {'encoding': 'base64', 'content': 'new'}})
+        _, messages, _ = self.start(AgentSession(self.root), {**self.files, 'hero.png': {'encoding': 'base64', 'content': 'bmV3'}})
         self.assertIn('hero.png', messages[-1]['content'])
 
 
@@ -175,4 +175,6 @@ class ResumeExecutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('已恢复构建会话', steps)
             self.assertIn('文件版本', encoded(observed[0]))
             self.assertEqual(sum(m.get('role') == 'tool' and '已写入 greet.py' in m.get('content', '') for m in observed[0]), 1)
-            self.assertTrue(result['summary'].startswith('Resumed CLI verified.'))
+            self.assertIn('hello', AgentSession(root).state['acceptance']['report'])
+            self.assertNotIn('Inspecting saved implementation', result['summary'])
+            self.assertTrue(AgentSession(root).state['completed'])

@@ -13,7 +13,6 @@ import { documentAccept, mediaAccept, readDocumentFiles, readMediaFiles, type Do
 import './chat-workspace.css'
 import FileMentionInput from './FileMentionInput'
 import PendingAttachments from './PendingAttachments'
-import VoiceInput from './VoiceInput'
 import type { Expert } from './ExpertLibrary'
 
 const ProjectCodeEditor = lazy(() => import('./ProjectCodeEditor'))
@@ -22,14 +21,16 @@ type SavedAttachment = { id: string; filename: string; mime_type: string; kind: 
 export type ElementReference = { value: string; domPath: string; code: string; text: string; src_path: string; component: string; url: string; parentCode: string; referenceKey: string; referenceNamespace: 'visual-editor-selection' }
 export type MessageOptions = { content?: string; elementReferences?: ElementReference[]; fileReferences?: string[] }
 type VisualTextChange = { reference: ElementReference; oldText: string; newText: string }
-export type ChatProject = { expert_ids?: string[]; id: string; title: string; status: string; preview_html: string; published: boolean; model: string; messages: { id: string; role: string; agent: string | null; content: string; created_at: string; expert_ids?: string[]; attachments?: SavedAttachment[]; element_references?: ElementReference[]; file_references?: string[] }[] }
+type RestorationMessage = { kind: 'restore'; version: number; status: 'running' | 'succeeded' | 'failed'; phase: string; steps: { phase: string; at: string }[]; result?: { restored_version?: number } }
+export type ChatProject = { expert_ids?: string[]; id: string; title: string; status: string; preview_html: string; published: boolean; model: string; messages: { id: string; role: string; agent: string | null; content: string; created_at: string; restoration?: RestorationMessage; expert_ids?: string[]; attachments?: SavedAttachment[]; element_references?: ElementReference[]; file_references?: string[] }[] }
 type Step = { id: number; kind: string; label: string; detail: string; created_at: string; tool_name?: string; tool_input?: string; tool_output?: string; token_usage?: { total_tokens?: number } }
 type Job = { state?: string; id: string; prompt: string; status: string; error: string; stop_requested: boolean; created_at: string; updated_at: string; steps: Step[] }
 type DeliveryBudget = { phase: string; complexity: string; task_tokens: number; token_limit: number; task_iterations: number; iteration_limit: number; task_calls: number; repair_tokens: number; repair_calls: number; repair_iterations: number; repair_token_limit?: number; repair_iteration_limit?: number; configured_iteration_limit?: number; total_tokens: number }
 type SessionInfo = { application_type?: string; delivery_budget?: DeliveryBudget; demo?: { ready: boolean; kind: string; report: string; deliverables?: {path:string}[] }; available: boolean; completed?: boolean; compactions?: number; prunes?: number; pruned_tokens?: number; local_read_hits?: number; estimated_context_tokens?: number; known_files?: number }
 type PreviewResult = { url: string; mode: 'live' | 'static' | 'none'; output: string }
-type RestoredPreview = { id: string; runtime?: PreviewResult; error?: string }
-type Version = { version: number; summary: string; created_at: string }
+type RestoredPreview = { id: string; generation: string; runtime?: PreviewResult; error?: string }
+type RestoreOperation = { id: string; version: number; status: 'running' | 'succeeded' | 'failed'; phase: string; error: string; result: { restored_version?: number; restored_preview?: PreviewResult } }
+type Version = { version: number; summary: string; created_at: string; data_snapshot?: boolean }
 type Command = { id: number; command: string; exit_code: number; output: string; created_at: string }
 type DirectoryEntry = { name: string; path: string; workspace_id?: string; kind: 'file' | 'directory'; size: number | null; modified_at: string }
 type FilePreview = { name: string; mime: string; text?: string; url?: string }
@@ -265,8 +266,12 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     catch (error) { setNotice((error as Error).message) }
   }
   const submitMessage = async () => {
+    if (isRestoring) return
     if (visualTextChanges.length) { setNotice('请先保存或丢弃预览中的文本更改'); return }
-    if (await sendMessage([...media, ...documents], { elementReferences, fileReferences })) { setMedia([]); setDocuments([]); setElementReferences([]); setFileReferences([]); designCommand({ action: 'clear' }) }
+    if (await sendMessage([...media, ...documents], { elementReferences, fileReferences })) {
+      setFollowing(true); setTab('editor')
+      setMedia([]); setDocuments([]); setElementReferences([]); setFileReferences([]); designCommand({ action: 'clear' })
+    }
   }
   const designCommand = (command: Record<string, unknown>) => previewRef.current?.contentWindow?.postMessage({ type: 'atoms-design-command', ...command }, '*')
   const activateDesign = (mode: 'none' | 'select' | 'text') => {
@@ -278,6 +283,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     if (!visualTextChanges.length || busy || isBuilding) return
     const content = '仅应用下列更改：\n\n' + visualTextChanges.map(change => `将引用 ${change.reference.value} 元素（${change.reference.domPath}）的文本从 ${JSON.stringify(change.oldText)} 更改为 ${JSON.stringify(change.newText)}。`).join('\n') + (draft.trim() ? `\n\n${draft.trim()}` : '')
     if (await sendMessage([], { content, elementReferences: visualTextChanges.map(change => change.reference) })) {
+      setFollowing(true); setTab('editor')
       designCommand({ action: 'clear' })
       setVisualTextChanges([]); setElementReferences([]); setDesignMode('none')
     }
@@ -299,7 +305,13 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   const addMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [activityOpen, setActivityOpen] = useState<Record<string, boolean>>({})
   const [working, setWorking] = useState(false)
+  const [stoppingJobId, setStoppingJobId] = useState<string | null>(null)
+  const stopRequestRef = useRef<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [restoreOperation, setRestoreOperation] = useState<RestoreOperation | null>(null)
+  const [restorePending, setRestorePending] = useState(false)
+  const appliedRestore = useRef('')
+  const activeRestore = useRef('')
   useEffect(() => {
     if (!notice) return
     const timer = setTimeout(() => setNotice(''), 10_000)
@@ -310,10 +322,14 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   const [restoredPreview, setRestoredPreview] = useState<RestoredPreview | null>(null)
   const syncRevision = useRef(0)
   const workspaceMutating = useRef(false)
+  const restoreRequestPending = useRef(false)
   const refreshWorkspace = useRef<() => void>(() => {})
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewMode, setPreviewMode] = useState<'live' | 'static' | 'none'>('none')
   const [previewStarting, setPreviewStarting] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const previewFailureKind = useRef('')
+  const previewDocument = useRef({ id: '', startedAt: 0 })
   const [runtimeOutput, setRuntimeOutput] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [previewErrorDismissed, setPreviewErrorDismissed] = useState(false)
@@ -331,12 +347,24 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   const uploadRef = useRef<HTMLInputElement>(null)
   const draftsRef = useRef<Record<string, string>>({})
   const id = project.id
-  const isBuilding = project.status === 'running' || project.status === 'queued'
+  const completedGeneration = jobs.filter(job => job.status === 'done').at(-1)?.id || ''
+  const frameId = `${id}:${previewUrl}:${frameKey}`
+  const currentFrameId = useRef(frameId)
+  currentFrameId.current = frameId
+  const [previewSession] = useState(() => {
+    const key = `atoms-preview-session:${id}`
+    let value = sessionStorage.getItem(key)
+    if (!value) { value = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''); sessionStorage.setItem(key, value) }
+    return value
+  })
+  const frameUrl = previewUrl ? `${previewUrl}${previewUrl.includes('?') ? '&' : '?'}v=${frameKey}&__atoms_frame=${encodeURIComponent(frameId)}&__atoms_session=${encodeURIComponent(previewSession)}` : ''
+  const isRestoring = restorePending || restoreOperation?.status === 'running' || (project.status === 'restoring' && restoreOperation?.status !== 'failed')
+  const isBuilding = project.status === 'running' || project.status === 'queued' || project.status === 'restoring' || isRestoring
   const sessionReady = sessionProjectId === id
-  const restoredWebPreview = restoredPreview?.id === id && !isBuilding && !!restoredPreview.runtime?.url
+  const restoredWebPreview = restoredPreview?.id === id && restoredPreview.generation === completedGeneration && !isBuilding && !!restoredPreview.runtime?.url
   const previewKind = restoredWebPreview ? 'web' : sessionReady ? sessionInfo.application_type || sessionInfo.demo?.kind || '' : ''
   const syncState = useRef({ busy, isBuilding })
-  syncState.current = { busy, isBuilding }
+  syncState.current = { busy, isBuilding: isBuilding || jobs.some(job => job.status === 'running' || job.status === 'queued') }
   const nonWebPreview = ['cli', 'library', 'artifact'].includes(previewKind)
   const canLaunchPreview = sessionReady && !nonWebPreview && !isBuilding
   const previewBlocked = !canLaunchPreview
@@ -346,6 +374,8 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   const previewStartupRetry = useRef(false)
   const previewRetryTimer = useRef<number | undefined>(undefined)
   const latestJob = jobs.at(-1)
+  const activeJob = jobs.find(job => job.status === 'running') || jobs.slice().reverse().find(job => job.status === 'queued')
+  const composerAction = isBuilding ? isRestoring ? '正在还原版本' : activeJob?.stop_requested || stoppingJobId ? '正在停止构建' : '停止构建' : '发送消息'
   const latestEditStep = latestJob?.steps.slice().reverse().find(step => editedFile(step))
   const latestEditPath = latestEditStep ? editedFile(latestEditStep) : ''
 
@@ -361,8 +391,8 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   }, [id, isBuilding, sessionReady, nonWebPreview, sessionInfo.demo?.ready, sessionInfo.demo?.deliverables?.map(item => item.path).join('|')])
 
   useEffect(() => {
-    if (isBuilding && !project.preview_html && following) setTab('editor')
-  }, [isBuilding, project.preview_html, following])
+    if (isBuilding && !isRestoring && following) setTab('editor')
+  }, [isBuilding, isRestoring, following])
 
   useEffect(() => {
     try {
@@ -428,10 +458,11 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     const refresh = async () => {
       if (disposed) return
       if (refreshing) { dirty = true; return }
-      if (workspaceMutating.current || syncState.current.busy || document.hidden) { dirty = true; return }
+      const blocked = () => (workspaceMutating.current || syncState.current.busy) && !restoreRequestPending.current
+      if (blocked() || document.hidden) { dirty = true; return }
       refreshing = true; dirty = false; lastPoll = Date.now()
       const revision = syncRevision.current
-      const current = () => !disposed && revision === syncRevision.current && !workspaceMutating.current && !syncState.current.busy
+      const current = () => !disposed && revision === syncRevision.current && !blocked()
       const abort = new AbortController()
       refreshController = abort
       const timeout = window.setTimeout(() => abort.abort(), 10000)
@@ -439,18 +470,28 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         // Session metadata is optional: a locked/corrupt checkpoint must never
         // prevent completed jobs and their final messages from reaching the UI.
         await Promise.allSettled([
-          request<ChatProject>(`/projects/${id}`, { signal: abort.signal }).then(value => { if (current()) setProject(value) }),
-          request<Job[]>(`/projects/${id}/jobs`, { signal: abort.signal }).then(value => { if (current()) setJobs(value) }),
-          request<SessionInfo>(`/projects/${id}/session`, { signal: abort.signal }).then(value => {
+          Promise.allSettled([
+            request<ChatProject>(`/projects/${id}`, { signal: abort.signal, cache: 'no-store' }),
+            request<Job[]>(`/projects/${id}/jobs`, { signal: abort.signal, cache: 'no-store' }),
+          ]).then(([nextProject, nextJobs]) => {
+            // Commit the generation and its project state together so preview
+            // startup does not run twice when these responses arrive apart.
+            if (current()) {
+              if (nextProject.status === 'fulfilled') setProject(nextProject.value)
+              if (nextJobs.status === 'fulfilled') setJobs(nextJobs.value)
+            }
+          }),
+          request<SessionInfo>(`/projects/${id}/session`, { signal: abort.signal, cache: 'no-store' }).then(value => {
             if (current()) { setSessionInfo(value); setSessionProjectId(id) }
           }).catch(() => { if (current()) setSessionProjectId(id) }),
+          request<{ restore: RestoreOperation | null }>(`/projects/${id}/restore`, { signal: abort.signal, cache: 'no-store' }).then(value => { if (current()) { setRestoreOperation(value.restore); if (value.restore?.id === activeRestore.current) setRestorePending(false) } }),
         ])
       } finally {
         window.clearTimeout(timeout)
         if (refreshController === abort) refreshController = null
         refreshing = false
         if (!current()) dirty = true
-        if (dirty && !disposed && !document.hidden && !workspaceMutating.current && !syncState.current.busy) schedule()
+        if (dirty && !disposed && !document.hidden && !blocked()) schedule()
       }
     }
     refreshWorkspace.current = () => schedule(0)
@@ -492,7 +533,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     schedule(0)
     void listen()
     const timer = window.setInterval(() => {
-      const interval = syncState.current.isBuilding ? 3000 : 15000
+      const interval = syncState.current.isBuilding ? 2000 : 5000
       if (!document.hidden && Date.now() - lastPoll >= interval) schedule(0)
     }, 1000)
     return () => {
@@ -505,6 +546,40 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   }, [id])
 
   useEffect(() => { syncRevision.current += 1; if (!busy) refreshWorkspace.current() }, [busy])
+
+
+  useEffect(() => {
+    if (!restoreOperation || restoreOperation.status === 'running' || (restoreOperation.status === 'succeeded' && project.status === 'restoring')) return
+    // Reopening a completed project must use its current runtime, not revive
+    // an old restoration token. Handle only this tab's request or an observed run.
+    if (activeRestore.current !== restoreOperation.id || appliedRestore.current === restoreOperation.id) return
+    appliedRestore.current = restoreOperation.id
+    setRestorePending(false)
+    draftsRef.current = {}; setOpenFiles([]); setActiveFile(''); setFileText(''); setSavedText(''); setFiles([])
+    setDirectoryEntries([]); setArtifactEntries([]); setShowArtifacts(false)
+    setRuntimeOutput(''); setConsoleEntries([]); setPreviewError(''); setPreviewErrorDismissed(false)
+    if (restoreOperation.status === 'succeeded') {
+      setRestoredPreview({ id, generation: completedGeneration, runtime: restoreOperation.result.restored_preview })
+      setNotice(`已还原版本 ${restoreOperation.version}，预览验证通过`)
+      setTab('preview'); setFrameKey(value => value + 1)
+      void request<Version[]>(`/projects/${id}/versions`).then(setVersions).catch(() => {})
+    } else {
+      setRestoredPreview({ id, generation: completedGeneration, error: restoreOperation.error })
+      setNotice(`版本 ${restoreOperation.version} 还原失败：${restoreOperation.error}`)
+      setPreviewError(restoreOperation.error)
+    }
+    setPreviewRevision(value => value + 1)
+    refreshWorkspace.current()
+  }, [id, restoreOperation, project.status])
+
+  useEffect(() => {
+    if (restoreOperation?.status !== 'running') return
+    activeRestore.current = restoreOperation.id
+    runtimeController.current?.abort(); window.clearTimeout(previewRetryTimer.current)
+    setPreviewUrl(''); setPreviewMode('none'); setPreviewError(''); setConsoleEntries([])
+    setHistoryOpen(false); setTab('preview')
+  }, [restoreOperation?.id, restoreOperation?.status])
+
 
   useEffect(() => {
     if (tab !== 'editor') return
@@ -557,10 +632,11 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
 
   const launchPreview = async (restart = false, command?: string) => {
     const eligible = () => previewEligibility.current.id === id && previewEligibility.current.canLaunchPreview && !workspaceMutating.current
-    if (!eligible()) return
+    if (!eligible() || (runtimeController.current && !runtimeController.current.signal.aborted && !restart && command === undefined)) return
     runtimeController.current?.abort()
     const controller = new AbortController()
     runtimeController.current = controller
+    let retryPending = false
     setPreviewStarting(true); setPreviewError(''); setPreviewErrorDismissed(false)
     try {
       const result = await request<{ url: string; mode: 'live' | 'static' | 'none'; output: string }>(`/projects/${id}/runtime`, {
@@ -576,16 +652,17 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         // a build completes. Give it one bounded retry before showing an error;
         // the backend also falls back to the latest static build artifact.
         if (!restart && !previewStartupRetry.current) {
+          retryPending = true
           previewStartupRetry.current = true
           previewRetryTimer.current = window.setTimeout(() => {
-            if (eligible()) void launchPreview(true)
+            if (eligible()) void launchPreview()
           }, 800)
         } else {
           setPreviewError((error as Error).message)
         }
       }
     } finally {
-      if (runtimeController.current === controller) { runtimeController.current = null; setPreviewStarting(false) }
+      if (runtimeController.current === controller) { runtimeController.current = null; if (!retryPending) setPreviewStarting(false) }
     }
   }
 
@@ -595,7 +672,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     previewStartupRetry.current = false
     setPreviewUrl(''); setPreviewMode('none'); setPreviewError(''); setPreviewErrorDismissed(false); setPreviewStarting(false)
     if (workspaceMutating.current) return
-    if (restoredPreview?.id === id && !isBuilding) {
+    if (restoredPreview?.id === id && restoredPreview.generation === completedGeneration && !isBuilding) {
       if (restoredPreview.runtime) {
         setPreviewUrl(isolatedPreviewUrl(restoredPreview.runtime.url))
         setPreviewMode(restoredPreview.runtime.mode)
@@ -603,21 +680,20 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
       }
       if (restoredPreview.error) setPreviewError(restoredPreview.error)
     } else {
-      if (restoredPreview) setRestoredPreview(null)
       if (canLaunchPreview && project.status !== 'error') void launchPreview()
     }
     return () => { runtimeController.current?.abort(); window.clearTimeout(previewRetryTimer.current) }
-  }, [id, canLaunchPreview, project.status, previewKind, previewRevision, restoredPreview])
+  }, [id, canLaunchPreview, project.status, previewKind, previewRevision, restoredPreview, completedGeneration])
 
   useEffect(() => {
     if (!canLaunchPreview || previewMode !== 'live') return
     let disposed = false
     const timer = window.setInterval(() => {
-      void request<{ status: { running: boolean; url: string; output: string } | null }>(`/projects/${id}/runtime`)
+      void request<{ status: { running: boolean; starting?: boolean; url: string; output: string } | null }>(`/projects/${id}/runtime`)
         .then(data => {
           if (disposed) return
           setRuntimeOutput(data.status?.output || '')
-          if (!data.status?.running || isolatedPreviewUrl(data.status.url) !== previewUrl) void launchPreview()
+          if (!data.status?.starting && (!data.status?.running || isolatedPreviewUrl(data.status.url) !== previewUrl)) void launchPreview()
         }).catch(() => {})
     }, 6000)
     return () => { disposed = true; window.clearInterval(timer) }
@@ -640,6 +716,11 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
   useEffect(() => {
     const onPreviewMessage = (event: MessageEvent) => {
       if (event.source !== previewRef.current?.contentWindow) return
+      if (event.data?.type === 'atoms-preview-handshake') {
+        if (Number(event.data.documentStartedAt) < previewDocument.current.startedAt) return
+        previewRef.current?.contentWindow?.postMessage({ type: 'atoms-preview-context', frameId: currentFrameId.current, documentId: event.data.documentId }, '*')
+        return
+      }
       if (event.data?.type === 'atoms-design-error') setNotice(String(event.data.message).slice(0, 200))
       if (event.data?.type === 'atoms-design-state') {
         const validReference = (reference: ElementReference) => reference && typeof reference.domPath === 'string' && typeof reference.code === 'string' && typeof reference.value === 'string'
@@ -648,7 +729,34 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         if (Array.isArray(event.data.changes)) setVisualTextChanges(event.data.changes.filter((change: VisualTextChange) => validReference(change.reference) && typeof change.oldText === 'string' && typeof change.newText === 'string').slice(0, 10))
         if (event.data.mode !== 'none') setChatOpen(true)
       }
+      if (String(event.data?.type || '').startsWith('atoms-preview-')) {
+        // WindowProxy survives iframe navigations. Require both frame and
+        // document identity so a delayed error cannot poison a newer preview.
+        if (event.data.frameId !== currentFrameId.current) return
+        const startedAt = Number(event.data.documentStartedAt)
+        if (!Number.isFinite(startedAt) || startedAt < previewDocument.current.startedAt) return
+        if (event.data.documentId !== previewDocument.current.id) {
+          if (startedAt <= previewDocument.current.startedAt) return
+          previewDocument.current = { id: event.data.documentId, startedAt }
+          previewFailureKind.current = ''
+          setPreviewError(''); setPreviewErrorDismissed(false); setConsoleEntries([])
+          setPreviewLoading(true)
+        }
+      }
+      if (event.data?.type === 'atoms-preview-state') {
+        if (event.data.state === 'loading') setPreviewLoading(true)
+        if (event.data.state === 'ready') {
+          setPreviewLoading(false)
+          if (['mount_timeout', 'frame_timeout'].includes(previewFailureKind.current)) {
+            previewFailureKind.current = ''; setPreviewError(''); setPreviewErrorDismissed(false)
+          }
+        }
+      }
       if (event.data?.type === 'atoms-preview-error') {
+        // Loading recovery must never erase a genuine JavaScript failure.
+        if (previewFailureKind.current === 'runtime' && event.data.kind !== 'runtime') return
+        previewFailureKind.current = event.data.kind || 'runtime'
+        setPreviewLoading(false)
         setPreviewError(String(event.data.message || '预览运行失败'))
         setPreviewErrorDismissed(false)
       }
@@ -668,15 +776,28 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     return () => window.removeEventListener('message', onPreviewMessage)
   }, [])
 
-  useEffect(() => { setPreviewError(''); setPreviewErrorDismissed(false); setConsoleEntries([]) }, [previewUrl, frameKey])
+  useEffect(() => {
+    previewDocument.current = { id: '', startedAt: 0 }
+    previewFailureKind.current = ''
+    setPreviewError(''); setPreviewErrorDismissed(false); setConsoleEntries([])
+    setPreviewLoading(!!previewUrl)
+    if (!previewUrl) return
+    // Covers HTTP error documents or a connection that never reaches the
+    // injected lifecycle script. Slow modules use the script's mount timeout.
+    const timer = window.setTimeout(() => {
+      if (previewDocument.current.id || previewFailureKind.current) return
+      previewFailureKind.current = 'frame_timeout'
+      setPreviewLoading(false); setPreviewError('预览连接超时，请刷新预览或查看终端日志')
+    }, 30000)
+    return () => window.clearTimeout(timer)
+  }, [previewUrl, frameKey])
   useEffect(() => { setDesignMode('none'); setElementReferences([]); setVisualTextChanges([]) }, [id, previewUrl, frameKey])
   useEffect(() => { if (isBuilding) { setDesignMode('none'); setElementReferences([]); setVisualTextChanges([]) } }, [isBuilding])
-  useEffect(() => { if (project.preview_html) setFrameKey(key => key + 1) }, [project.preview_html])
 
   useEffect(() => {
     if (!historyOpen) return
     void request<Version[]>(`/projects/${id}/versions`).then(setVersions).catch(error => setNotice(error.message))
-  }, [id, historyOpen, project.status])
+  }, [id, historyOpen, project.status, completedGeneration])
 
   useEffect(() => {
     if (!activeFile) return
@@ -689,8 +810,8 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [jobs.length, latestJob?.steps.length, project.messages.length])
   useEffect(() => {
-    if (following && latestJob?.status === 'done' && (project.preview_html || artifactEntries.length)) setTab('preview')
-  }, [following, latestJob?.status, project.preview_html, artifactEntries.length])
+    if (following && !isBuilding && latestJob?.status === 'done' && (project.preview_html || artifactEntries.length)) setTab('preview')
+  }, [following, isBuilding, latestJob?.status, project.preview_html, artifactEntries.length])
 
   const selectFile = (file: string) => {
     if (activeFile && fileText !== savedText) draftsRef.current[activeFile] = fileText
@@ -768,7 +889,6 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     try {
       const uploaded: string[] = []
       for (const file of Array.from(selected)) {
-        if (file.size > 5_000_000) throw new Error(`${file.name} 超过 5 MB`)
         const response = await authFetch(`/projects/${id}/assets/${encodeURIComponent(file.name)}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
         })
@@ -887,27 +1007,33 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     }
   }
   const restore = async (version: number) => {
-    if (working || workspaceMutating.current || !window.confirm(`还原版本 ${version}？当前代码将被该版本替换。`)) return
+    if (working || isBuilding || workspaceMutating.current || !window.confirm(`还原版本 ${version}？代码、数据库和浏览器数据将恢复到该版本，全部历史版本会保留。`)) return
     workspaceMutating.current = true; syncRevision.current += 1
+    restoreRequestPending.current = true
     runtimeController.current?.abort(); window.clearTimeout(previewRetryTimer.current)
-    setWorking(true); setNotice('正在还原版本并恢复预览…')
-    setPreviewUrl(''); setPreviewMode('none'); setPreviewError(''); setPreviewStarting(true)
+    setRestorePending(true); setWorking(true); setNotice('')
+    setPreviewUrl(''); setPreviewMode('none'); setPreviewError(''); setRuntimeOutput(''); setConsoleEntries([])
+    setHistoryOpen(false); setTab('preview')
     try {
-      const result = await request<ChatProject & { restored_preview?: PreviewResult; restore_preview_error?: string }>(`/projects/${id}/restore/${version}`, { method: 'POST' })
-      syncRevision.current += 1
-      workspaceMutating.current = false
-      setProject(result)
-      setSessionProjectId(id)
-      setRestoredPreview({ id, runtime: result.restored_preview, error: result.restore_preview_error })
-      draftsRef.current = {}; setFileText(''); setSavedText(''); setFiles([])
-      setNotice(result.restore_preview_error ? `版本 ${version} 的代码已还原，但预览启动失败：${result.restore_preview_error}` : `已还原版本 ${version}`)
-      setHistoryOpen(false); setTab('preview'); setFrameKey(key => key + 1)
-    } catch (error) { setNotice((error as Error).message); setPreviewError((error as Error).message) }
-    finally {
+      const result = await request<{ restore_id: string }>(`/projects/${id}/restore/${version}`, { method: 'POST', headers: { 'X-Atoms-Restore-Protocol': '2' } })
+      if (!result.restore_id) throw new Error('还原接口未返回任务编号，请刷新工作页后重试')
+      activeRestore.current = result.restore_id
+    } catch (error) {
+      // A lost HTTP response does not mean the worker stopped. Reconcile the
+      // durable operation before deciding whether restoration was accepted.
+      const status = await request<{ restore: RestoreOperation | null }>(`/projects/${id}/restore`, { cache: 'no-store' }).catch(() => null)
+      if (status?.restore?.status === 'running') {
+        activeRestore.current = status.restore.id; setRestoreOperation(status.restore)
+      } else {
+        setRestorePending(false); setNotice((error as Error).message)
+      }
+    } finally {
+      restoreRequestPending.current = false
       workspaceMutating.current = false; syncRevision.current += 1
-      setWorking(false); setPreviewStarting(false); refreshWorkspace.current()
+      setWorking(false); refreshWorkspace.current()
     }
   }
+
 
   const downloadSource = async () => {
     try {
@@ -931,10 +1057,16 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
     } catch (error) { setNotice((error as Error).message) }
   }
   const stopJob = async (jobId: string) => {
+    if (stopRequestRef.current || jobs.find(job => job.id === jobId)?.stop_requested) return
+    stopRequestRef.current = jobId; setStoppingJobId(jobId)
     try {
       await request(`/projects/${id}/jobs/${jobId}/stop`, { method: 'POST' })
+      syncRevision.current += 1
+      setJobs(current => current.map(job => job.id === jobId ? { ...job, stop_requested: true } : job))
       setNotice('已请求停止任务')
+      refreshWorkspace.current()
     } catch (error) { setNotice((error as Error).message) }
+    finally { stopRequestRef.current = null; setStoppingJobId(null) }
   }
   const terminalSteps = useMemo(() => jobs.flatMap(job => job.steps), [jobs])
   const executionEntries = useMemo(() => jobs.flatMap(job => {
@@ -980,27 +1112,28 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
             {menu === 'more' && <div className="build-menu right build-tool-menu"><div className="build-tool-menu-title">工作区工具</div>{workspaceTools.map(tool => { const Icon = toolIcons[tool.id]; return <div className="build-tool-menu-row" key={tool.id}><button className="build-tool-open" onClick={() => openWorkspaceTool(tool.id)}><Icon size={15} /><span>{tool.label}</span>{tab === (tool.id === 'browser' ? 'preview' : tool.id) && <i />}</button><button className="build-tool-pin" title={pinnedTools.includes(tool.id) ? '取消置顶' : '置顶工具'} aria-label={pinnedTools.includes(tool.id) ? `取消置顶${tool.label}` : `置顶${tool.label}`} onClick={() => togglePinnedTool(tool.id)}>{pinnedTools.includes(tool.id) ? <PinOff size={14} /> : <Pin size={14} />}</button></div>})}<div className="build-tool-menu-divider" /><button onClick={() => { void downloadSource(); setMenu(null) }}>下载项目</button><button onClick={() => { setHistoryOpen(true); setMenu(null) }}>版本历史</button><button onClick={() => { onRename(); setMenu(null) }}>重命名</button>{project.published && <button onClick={() => { onUnpublish(); setMenu(null) }}>取消发布</button>}</div>}
           </div>
         </div>
-        <div className="build-actions">{isBuilding && <button className={`build-follow ${following ? 'on' : ''}`} onClick={() => setFollowing(!following)}><span>•</span>{following ? '正在跟随智能体' : '跟随智能体'}</button>}<button className="build-share" disabled={!project.preview_html} onClick={onShare}>分享</button><button className="build-publish" disabled={publishBusy} onClick={onPublish}>{publishBusy ? '发布中…' : project.published ? '更新' : '发布'}</button></div>
+        <div className="build-actions">{isBuilding && <button className={`build-follow ${following ? 'on' : ''}`} onClick={() => setFollowing(!following)}><span>•</span>{following ? '正在跟随智能体' : '跟随智能体'}</button>}<button className="build-share" disabled={!project.preview_html} onClick={onShare}>分享</button><button className="build-publish" disabled={publishBusy || isRestoring} onClick={onPublish}>{publishBusy ? '发布中…' : project.published ? '更新' : '发布'}</button></div>
       </div>
     </header>
     <div className="build-content">
       {chatOpen && <section className="build-chat">
         <div className="build-feed">
           {project.messages.map(message => {
-            const job = message.role === 'user' ? jobs[jobIndex++] : undefined
+            const job = message.role === 'user' && !message.restoration ? jobs[jobIndex++] : undefined
             const expanded = job ? activityOpen[job.id] ?? (job.status !== 'done') : false
             return <div key={message.id}>
               {!!message.file_references?.length && <div className="build-file-reference-chips">{message.file_references.map(path => <span key={path}><button type="button" title={`打开 ${path}`} onClick={() => openEditedFile(path)}><File size={13} />{path}</button></span>)}</div>}
               {message.role === 'user' ? <div className="build-user-row"><div className="build-user-bubble">{!!message.element_references?.length && <div className="build-element-references">{message.element_references.map(reference => <span key={reference.domPath} title={`${reference.domPath}\n${reference.text}`}><MousePointer2 size={13} />{reference.value}</span>)}</div>}{!!message.expert_ids?.length && <div className="build-message-experts">{message.expert_ids.map(id => <span key={id}>使用 {experts.find(expert => expert.id === id)?.name || id}</span>)}</div>}{message.content}{!!message.attachments?.length && <div className="build-message-media-list">{message.attachments.map(attachment => <SavedMedia key={attachment.id} projectId={project.id} attachment={attachment} />)}</div>}</div></div> :
-                <div className="build-agent-message"><img src="/agents/5.webp" alt="" /><div className="build-agent-content"><div className="build-agent-meta"><span>{message.agent || 'Alex'}</span><span>工程师</span><time>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div><MessageText content={message.content} files={editedFiles(jobs[jobIndex - 1])} onOpenFile={openEditedFile} />{jobs[jobIndex - 1]?.status === 'done' && <button className="build-version-card" onClick={() => setHistoryOpen(true)}><strong>{jobs[jobIndex - 1].steps.find(step => step.kind === 'version')?.label || '版本已完成'}</strong><span>查看历史 <ChevronRight size={14} /></span></button>}</div></div>}
+                <div className="build-agent-message"><img src={message.restoration ? '/agents/0.webp' : '/agents/5.webp'} alt="" /><div className="build-agent-content"><div className="build-agent-meta"><span>{message.agent || 'Alex'}</span><span>{message.restoration ? '团队领导' : '工程师'}</span><time>{new Date(message.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div><MessageText content={message.content} files={message.restoration ? [] : editedFiles(jobs[jobIndex - 1])} onOpenFile={openEditedFile} />{message.restoration && <div className="build-restoration-card" role="status" aria-live="polite" data-restore-status={message.restoration.status}><strong>{message.restoration.status === 'running' ? '正在还原版本' : message.restoration.status === 'succeeded' ? '版本还原完成' : '版本还原失败'} · v{message.restoration.version}</strong>{message.restoration.steps.map((step, index) => <div key={index}>{step.phase}</div>)}{message.restoration.steps.at(-1)?.phase !== message.restoration.phase && <div>{message.restoration.phase}</div>}{message.restoration.status === 'running' && <p>还原需要些时间，请等待…</p>}{message.restoration.status === 'succeeded' && <button onClick={() => setHistoryOpen(true)}>查看全部版本</button>}</div>}{!message.restoration && jobs[jobIndex - 1]?.status === 'done' && <button className="build-version-card" onClick={() => setHistoryOpen(true)}><strong>{jobs[jobIndex - 1].steps.find(step => step.kind === 'version')?.label || '版本已完成'}</strong><span>查看历史 <ChevronRight size={14} /></span></button>}</div></div>}
               {job && <><div className="build-agent-message build-workflow-agent"><img src="/agents/5.webp" alt="" /><div className="build-agent-content"><div className="build-agent-meta"><span>Alex</span><span>工程师</span><time>{new Date(job.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div></div></div><div className="build-workflow">
                 <button className="build-workflow-head" onClick={() => setActivityOpen(state => ({ ...state, [job.id]: !expanded }))}><CircleCheck size={18} className={job.status === 'done' ? 'done' : ''} /><span>{job.status === 'done' ? `本轮已结束 · ${jobDuration(job)}` : job.status === 'running' ? '工作流程' : job.status === 'queued' ? '正在排队' : job.status === 'stopped' ? '已停止' : '构建遇到问题'}</span>{expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
                 {expanded && <div className="build-workflow-steps">{job.steps.filter(step => step.kind !== 'usage').map(step => { const filePath = filePathForStep(step); return <div className="build-workflow-step" key={step.id}><span className="build-step-dot" /><div><span>{stepLabel(step)}</span>{stepDetail(step) && <div className={step.kind === 'tool' ? 'build-tool-call' : 'build-step-detail'}>{step.kind === 'tool' && <File size={14} />}{filePath && <button className="build-step-file-link" onClick={() => openEditedFile(filePath)} title={`在编辑器中打开 ${filePath}`}><File size={14} />{filePath}</button>}<span>{stepDetail(step).slice(0, 260)}{stepDetail(step).length > 260 ? '…' : ''}</span></div>}</div></div>})}</div>}
-                {(job.status === 'running' || job.status === 'queued') && <div className="build-agent-working"><span className="build-working-mark">✦</span>Alex 正在工作 <button disabled={job.stop_requested} onClick={() => void stopJob(job.id)}><Square size={12} /> 停止</button></div>}
+                {(job.status === 'running' || job.status === 'queued') && <div className="build-agent-working"><span className="build-working-mark">✦</span>Alex 正在工作 <button disabled={job.stop_requested || !!stoppingJobId} onClick={() => void stopJob(job.id)}><Square size={12} /> {job.stop_requested || stoppingJobId === job.id ? '停止中…' : '停止'}</button></div>}
                 {job.status === 'error' && <div className="build-error">{job.error}</div>}
               </div></>}
             </div>
           })}
+          {restorePending && !project.messages.some(message => message.restoration?.status === 'running' && message.role === 'assistant') && <div className="build-agent-message"><img src="/agents/0.webp" alt="" /><div className="build-agent-content"><div className="build-agent-meta"><span>Mike</span><span>团队领导</span></div><div className="build-restoration-card" role="status" aria-live="polite"><strong>正在准备版本还原</strong><p>正在重建运行环境，还原需要些时间，请等待…</p></div></div></div>}
           <div ref={bottomRef} />
         </div>
         <div className="build-compose">
@@ -1013,8 +1146,8 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
           <div className="build-expert-row">{expertControl}{tierControl}{toolsControl}</div>
           <div className="build-compose-bottom">
             <div className="build-menu-anchor" onMouseEnter={() => { if (addMenuCloseTimer.current) clearTimeout(addMenuCloseTimer.current); addMenuCloseTimer.current = null; setMenu('add') }} onMouseLeave={() => { addMenuCloseTimer.current = setTimeout(() => { setMenu(current => current === 'add' ? null : current); addMenuCloseTimer.current = null }, 300) }}><button className="build-round-button" title="添加" onClick={() => setMenu(menu === 'add' ? null : 'add')}><Plus size={18} /></button>{menu === 'add' && <div className="build-menu above"><div className="build-model-slot">{modelControl}</div><button onClick={() => { setMenu(null); onChooseExperts() }}>选择专家</button><button onClick={() => mediaRef.current?.click()}>上传图片</button><button onClick={() => documentRef.current?.click()}>上传文档</button><button onClick={() => { setTab('editor'); setMenu(null) }}>查看项目文件</button></div>}<input ref={mediaRef} type="file" accept={mediaAccept} multiple hidden onChange={event => { void addMedia(Array.from(event.target.files || [])); event.target.value = '' }} /><input ref={documentRef} type="file" accept={documentAccept} multiple hidden onChange={event => { void addDocuments(Array.from(event.target.files || [])); event.target.value = '' }} /></div>
-            <div className="build-compose-spacer" /><VoiceInput key={id} projectId={id} draft={draft} setDraft={setDraft} onError={setNotice} />
-            <button className="build-send" disabled={(!draft.trim() && !media.length && !documents.length && !fileReferences.length) || busy || isBuilding} onClick={() => void submitMessage()} title={isBuilding ? '构建完成后继续对话' : '发送消息'}>{isBuilding ? <Square size={15} fill="currentColor" /> : <ArrowUp size={19} />}</button>
+            <div className="build-compose-spacer" />
+            <button className="build-send" disabled={isBuilding ? isRestoring || !activeJob || activeJob.stop_requested || !!stoppingJobId : (!draft.trim() && !media.length && !documents.length && !fileReferences.length) || busy} onClick={() => { if (isBuilding) { if (!isRestoring && activeJob) void stopJob(activeJob.id) } else void submitMessage() }} title={composerAction} aria-label={composerAction}>{isBuilding ? <Square size={15} fill="currentColor" /> : <ArrowUp size={19} />}</button>
           </div>
         </div>
       </section>}
@@ -1025,7 +1158,7 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         </div>}
         {tab === 'preview' && <div className={`build-viewer ${consoleOpen ? 'console-open' : ''}`}>
           {nonWebPreview || !sessionReady ? <div className="build-viewer-bar"><span style={{padding:'8px 16px'}}>成果预览</span></div> : <div className="build-viewer-bar"><button title={mobile ? '桌面预览' : '手机预览'} onClick={() => setMobile(!mobile)}>{mobile ? <Smartphone size={15} /> : <Laptop size={15} />}</button><button title="刷新页面" disabled={previewBlocked} onClick={() => setFrameKey(key => key + 1)}><RefreshCw size={15} /></button><button title="重启开发服务" disabled={previewBlocked || previewStarting} onClick={() => void launchPreview(true)}><Play size={15} /></button><button title="停止开发服务" disabled={previewMode !== 'live'} onClick={() => void stopPreview()}><Square size={14} /></button><button title="配置启动命令" disabled={previewBlocked || previewStarting} onClick={() => void configurePreview()}><TerminalSquare size={15} /></button><button title="主页" disabled={previewBlocked} onClick={() => setFrameKey(key => key + 1)}><Home size={15} /></button><div className="build-address">{isBuilding ? '代码构建中' : previewMode === 'live' ? '实时开发服务' : previewMode === 'static' ? '构建产物' : '等待服务'} <ChevronDown size={13} /></div><button title="新标签页打开" disabled={!previewUrl || previewBlocked} onClick={openPreview}><ExternalLink size={15} /></button><button className="build-console-link" onClick={() => setConsoleOpen(open => !open)}><Code2 size={14} /> 控制台{consoleErrorCount > 0 ? ` · ${consoleErrorCount}` : ''}</button></div>}
-          {artifactEntries.length > 0 && !nonWebPreview && <div style={{display:'flex',gap:8,padding:8}}><button onClick={() => setShowArtifacts(false)}>应用预览</button><button onClick={() => setShowArtifacts(true)}>成果文件</button></div>}<div className={`build-viewer-body ${mobile ? 'mobile' : ''}`}>{isBuilding ? <div className="build-preview-empty"><span>✳</span><strong>{sessionInfo.delivery_budget?.phase === 'stabilization' ? '正在修复启动与预览，准备演示' : '正在完成任务'}</strong><p>成果通过实际运行或文件预览检查后，会自动展示。</p></div> : artifactEntries.length > 0 && (showArtifacts || nonWebPreview) ? <ArtifactViewer projectId={id} entries={artifactEntries} onDownload={entry => void downloadArtifact(entry)} /> : !sessionReady || previewKind === 'artifact' ? <div className="build-preview-empty"><strong>{!sessionReady ? '正在读取成果信息…' : '暂未生成成果文件'}</strong></div> : previewUrl ? <iframe key={frameKey} ref={previewRef} title={`${project.title} 预览`} src={`${previewUrl}?v=${frameKey}`} sandbox="allow-scripts allow-forms allow-modals" /> : sessionInfo.demo?.ready && nonWebPreview ? <div className="build-preview-empty"><strong>{artifactEntries.length ? "生成成果已就绪" : "程序演示验证通过"}</strong>{artifactEntries.map(entry => <button key={entry.path} onClick={() => void downloadArtifact(entry)}>下载 {entry.name}</button>)}<pre style={{ whiteSpace: 'pre-wrap', textAlign: 'left', maxWidth: '90%', maxHeight: '70%', overflow: 'auto' }}>{sessionInfo.demo.report}</pre><p>可在终端再次运行演示命令。</p><button onClick={() => setTab('terminal')}>打开终端</button></div> : <div className="build-preview-empty"><span>✳</span><strong>{previewStarting ? '正在启动开发服务' : project.status === 'error' ? '构建遇到问题' : '暂无 Web 服务'}</strong><p>{previewStarting ? '请稍候，正在工作区运行启动命令。' : project.status === 'error' ? '请先查看终端中的任务错误，修复后再重试预览。' : '配置开发服务命令，或在终端运行非 Web 程序。'}</p></div>}{previewError && !previewErrorDismissed && !isBuilding && <div className="build-preview-error"><strong>预览运行失败</strong><span>{previewError.includes('WebGL') ? '当前浏览器无法创建 WebGL 上下文。' : previewError} 请查看终端日志，修复后重启或刷新预览。</span><button onClick={() => { setPreviewErrorDismissed(true); setTab('terminal') }}>查看终端</button><button onClick={() => void launchPreview(true)}>重启</button><button title="关闭提示" aria-label="关闭预览错误提示" onClick={() => setPreviewErrorDismissed(true)}><X size={14} /></button></div>}</div>
+          {artifactEntries.length > 0 && !nonWebPreview && <div style={{display:'flex',gap:8,padding:8}}><button onClick={() => setShowArtifacts(false)}>应用预览</button><button onClick={() => setShowArtifacts(true)}>成果文件</button></div>}<div className={`build-viewer-body ${mobile ? 'mobile' : ''}`}>{restoreOperation?.status === 'failed' && project.status === 'restoring' ? <div className="build-preview-empty" role="alert"><strong>还原失败，工作区等待恢复</strong><p>{restoreOperation.error}</p></div> : isRestoring ? <div className="build-preview-empty" role="status" aria-live="polite"><span className="spinner" /><strong>正在还原版本{restoreOperation?.status === 'running' ? ` ${restoreOperation.version}` : ''}</strong><p>还原需要些时间，请等待…</p><p>{restoreOperation?.status === 'running' ? restoreOperation.phase : '正在提交还原请求'}</p></div> : isBuilding ? <div className="build-preview-empty"><span>✳</span><strong>{sessionInfo.delivery_budget?.phase === 'stabilization' ? '正在修复启动与预览，准备演示' : '正在完成任务'}</strong><p>成果通过实际运行或文件预览检查后，会自动展示。</p></div> : artifactEntries.length > 0 && (showArtifacts || nonWebPreview) ? <ArtifactViewer projectId={id} entries={artifactEntries} onDownload={entry => void downloadArtifact(entry)} /> : !sessionReady || previewKind === 'artifact' ? <div className="build-preview-empty"><strong>{!sessionReady ? '正在读取成果信息…' : '暂未生成成果文件'}</strong></div> : previewUrl ? <><iframe key={frameId} ref={previewRef} title={`${project.title} 预览`} src={frameUrl} sandbox="allow-scripts allow-forms allow-modals" />{previewLoading && !previewError && <div className="build-preview-loading" role="status" aria-live="polite"><span className="spinner" />正在加载应用，请稍候…</div>}</> : sessionInfo.demo?.ready && nonWebPreview ? <div className="build-preview-empty"><strong>{artifactEntries.length ? "生成成果已就绪" : "程序演示验证通过"}</strong>{artifactEntries.map(entry => <button key={entry.path} onClick={() => void downloadArtifact(entry)}>下载 {entry.name}</button>)}<pre style={{ whiteSpace: 'pre-wrap', textAlign: 'left', maxWidth: '90%', maxHeight: '70%', overflow: 'auto' }}>{sessionInfo.demo.report}</pre><p>可在终端再次运行演示命令。</p><button onClick={() => setTab('terminal')}>打开终端</button></div> : <div className="build-preview-empty"><span>✳</span><strong>{previewStarting ? '正在启动开发服务' : project.status === 'error' ? '构建遇到问题' : '暂无 Web 服务'}</strong><p>{previewStarting ? '请稍候，正在工作区运行启动命令。' : project.status === 'error' ? '请先查看终端中的任务错误，修复后再重试预览。' : '配置开发服务命令，或在终端运行非 Web 程序。'}</p></div>}{previewError && !previewErrorDismissed && !isBuilding && <div className="build-preview-error"><strong>{['mount_timeout', 'frame_timeout'].includes(previewFailureKind.current) ? '预览加载超时' : '预览运行失败'}</strong><span>{previewError.includes('WebGL') ? '当前浏览器无法创建 WebGL 上下文。' : previewError} {['mount_timeout', 'frame_timeout'].includes(previewFailureKind.current) ? '加载完成后会自动恢复，也可刷新预览。' : '请查看终端日志，修复后重启或刷新预览。'}</span><button onClick={() => { setPreviewErrorDismissed(true); setTab('terminal') }}>查看终端</button><button onClick={() => void launchPreview(true)}>重启</button><button title="关闭提示" aria-label="关闭预览错误提示" onClick={() => setPreviewErrorDismissed(true)}><X size={14} /></button></div>}</div>
           {previewUrl && !isBuilding && (designToolsCollapsed ? <button className="build-design-expand" title="展开设计工具" aria-label="展开设计工具" onClick={() => setDesignToolsCollapsed(false)}><ChevronLeft size={17} /></button> : <div className="build-design-tools-wrap"><div className={`build-design-tools ${designMode !== 'none' ? 'editing' : ''}`}><button title="选择元素" className={designMode === 'select' ? 'active' : ''} onClick={() => activateDesign(designMode === 'select' ? 'none' : 'select')}><MousePointer2 size={16} /></button><button title="修改文本" className={designMode === 'text' ? 'active' : ''} onClick={() => activateDesign(designMode === 'text' ? 'none' : 'text')}>T</button>{designMode === 'none' ? <button title="主题" onClick={() => setNotice('请在代码编辑器中修改主题')}>◉</button> : <><span className="build-design-status">{visualTextChanges.length ? `${visualTextChanges.length} 个文本更改` : designMode === 'select' ? elementReferences.length ? `编辑 ${elementReferences.length} 个选中项，在聊天窗口中` : '点击选择，Ctrl/Cmd + 点击可多选' : '点击文本修改，或双击直接编辑'}</span>{visualTextChanges.length ? <><button className="build-design-action" onClick={() => designCommand({ action: 'discard' })}>丢弃</button><button className="build-design-action save" disabled={busy} onClick={() => void saveVisualText()}>保存</button></> : <button className="build-design-action" onClick={() => activateDesign('none')}>退出</button>}</>}</div><button className="build-design-collapse" title="隐藏设计工具" aria-label="隐藏设计工具" onClick={() => setDesignToolsCollapsed(true)}><ChevronRight size={17} /></button></div>)}
           {consoleOpen && <div className="build-preview-console">
             <div className="build-console-head"><strong>控制台</strong><div className="build-console-filters">
@@ -1053,6 +1186,6 @@ export default function ChatWorkspace({ projectMenu, toolsControl, tierControl, 
         {notice && <div className="build-notice"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="关闭提示"><X size={15} /></button></div>}
       </section>
     </div>
-    {historyOpen && <div className="build-history-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setHistoryOpen(false) }}><aside className="build-history"><div className="build-history-head"><strong>历史记录</strong><button title="关闭历史记录" onClick={() => setHistoryOpen(false)}><X size={17} /></button></div><div className="build-history-tab">版本</div><div className="build-history-list">{versions.length ? versions.map(version => <div className="build-version" key={version.version}><div><strong>版本 {version.version}</strong><p>{version.summary.split('\n').find(line => line.trim())?.slice(0, 90) || project.title}</p><time>{new Date(version.created_at).toLocaleString('zh-CN')}</time></div><span>v{version.version}</span><button disabled={working || isBuilding} onClick={() => void restore(version.version)}>还原</button></div>) : <p>版本管理的探索之旅正等着你</p>}</div></aside></div>}
+    {historyOpen && <div className="build-history-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setHistoryOpen(false) }}><aside className="build-history"><div className="build-history-head"><strong>历史记录</strong><button title="关闭历史记录" onClick={() => setHistoryOpen(false)}><X size={17} /></button></div><div className="build-history-tab">版本</div><div className="build-history-list">{versions.length ? versions.map(version => <div className="build-version" key={version.version}><div><strong>版本 {version.version}</strong><p>{version.summary.split('\n').find(line => line.trim())?.slice(0, 90) || project.title}</p><time>{new Date(version.created_at).toLocaleString('zh-CN')}</time>{version.data_snapshot === false && <p>旧版本缺少数据快照，无法完整还原</p>}</div><span>v{version.version}</span><button disabled={working || isBuilding} onClick={() => void restore(version.version)}>还原</button></div>) : <p>版本管理的探索之旅正等着你</p>}</div></aside></div>}
   </div>
 }

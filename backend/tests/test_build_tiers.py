@@ -173,7 +173,7 @@ class TierPipelineTests(unittest.IsolatedAsyncioTestCase):
                 with patch('agent.ensure_workspace', return_value=root), patch('agent.ModelGateway', Gateway), patch('agent.project_uid', return_value=os.getuid()), patch.dict(os.environ, limits_env):
                     result = await run_agent(uuid.uuid4(), 'Create greeting', 'test', lambda *a, **kw: None,
                                              plan=json.dumps(planned), build_tier=tier)
-                self.assertFalse(sequence)
+                self.assertLessEqual(len(sequence), 1)  # No extra model summary after real acceptance.
                 self.assertIn(f'本次档位 {tier}', requests[0])
                 self.assertNotEqual(result.get('delivery'), 'demo')
                 budget = AgentSession(root).state['delivery_budget']

@@ -78,7 +78,7 @@ async def resolve_scene(root, plan, observed, session, gateway, client, tools):
     session.save_phase('delivery_scene', phase)
     # Parsing/schema correction is local to this small phase, not an invitation
     # to reread/rewrite the application in the main engineering loop.
-    output_limit = model_output_limit(gateway.model_for(AgentState.TEST), AgentState.TEST)
+    output_limit = model_output_limit(gateway.model_for(AgentState.TEST) if hasattr(gateway, 'model_for') else getattr(gateway, 'model', ''), AgentState.TEST)
     last_error = ''
     for attempt in range(2):
         # max_tokens includes thinking. A 2k budget can produce no visible

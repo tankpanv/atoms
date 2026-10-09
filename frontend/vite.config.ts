@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
+    allowedHosts: ['frontend'],
     // Let /api preflight reach the API's project-aware CORS policy. Vite's
     // default CORS middleware otherwise answers opaque sandbox origins itself.
     cors: false,

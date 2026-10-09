@@ -108,7 +108,7 @@ services:
       # Keep a coherent multi-file working set by default. The agent still
       # clamps this to the selected model's hard context limit; override for
       # constrained providers or cost-sensitive deployments.
-      AGENT_CONTEXT_TOKENS: ${AGENT_CONTEXT_TOKENS:-512000}
+      AGENT_CONTEXT_TOKENS: ${AGENT_CONTEXT_TOKENS:-auto}
       AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-}
       AGENT_SECRET: ${AGENT_SECRET:-}
       AGENT_IMAGE: ${AGENT_IMAGE:-atoms-demo-backend}
@@ -125,6 +125,12 @@ services:
       PROJECT_PIDS_LIMIT: ${PROJECT_PIDS_LIMIT:-512}
       VISION_URL: ${VISION_URL:-http://vision:11434}
       VISION_MODEL: ${VISION_MODEL:-qwen2.5vl:3b}
+      MINIO_ENDPOINT_URL: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-atoms-published}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-atoms-minio}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-atoms-minio-local-password}
+      PUBLISHED_MEMORY_MB: ${PUBLISHED_MEMORY_MB:-1536}
+      PUBLISHED_CPUS: ${PUBLISHED_CPUS:-2}
       PYTHONDONTWRITEBYTECODE: "1"
     depends_on:
       db:

@@ -78,13 +78,15 @@ def grant_project_role(conn, project_id: uuid.UUID):
     else:
         conn.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(password)))
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
-    conn.execute(sql.SQL("GRANT SELECT,INSERT,UPDATE ON projects,messages,message_attachments,agent_jobs,agent_steps,project_versions,project_commands TO {}").format(sql.Identifier(role)))
+    conn.execute(sql.SQL("GRANT SELECT,INSERT,UPDATE ON projects,messages,message_attachments,agent_jobs,agent_steps,project_versions,project_commands,project_restores,runtime_routes TO {}").format(sql.Identifier(role)))
+    conn.execute(sql.SQL("GRANT DELETE ON runtime_routes TO {}").format(sql.Identifier(role)))
     conn.execute(sql.SQL("GRANT USAGE,SELECT ON SEQUENCE agent_steps_id_seq,project_commands_id_seq TO {}").format(sql.Identifier(role)))
 
 
 def enable_project_rls(conn):
     for table, identifier in (("projects", "id"), ("messages", "project_id"), ("message_attachments", "project_id"),
                               ("agent_jobs", "project_id"), ("project_versions", "project_id"),
+                              ("project_restores", "project_id"), ("runtime_routes", "project_id"),
                               ("project_commands", "project_id")):
         conn.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         conn.execute(f"DROP POLICY IF EXISTS atoms_project_scope ON {table}")
@@ -132,6 +134,8 @@ def init_db():
         conn.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS workspace_path TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS published_storage_bucket TEXT NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS published_storage_prefix TEXT NOT NULL DEFAULT ''")
+        from project_publication import init_publication_db
+        init_publication_db(conn)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS published_objects (
                 project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -255,6 +259,8 @@ def init_db():
         init_github_db(conn)
         from project_database import init_connector
         init_connector(conn)
+        from project_state_snapshots import init_state_snapshots
+        init_state_snapshots(conn)
         enable_project_rls(conn)
         for existing in conn.execute("SELECT id FROM projects").fetchall():
             grant_project_role(conn, existing["id"])
@@ -276,7 +282,7 @@ def init_db():
             END;
             $$ LANGUAGE plpgsql
         """)
-        for table in ("projects", "messages", "agent_jobs", "agent_steps", "project_versions"):
+        for table in ("projects", "messages", "agent_jobs", "agent_steps", "project_versions", "project_restores"):
             conn.execute(f"DROP TRIGGER IF EXISTS atoms_project_event ON {table}")
             conn.execute(f"CREATE TRIGGER atoms_project_event AFTER INSERT OR UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION atoms_notify_project_event()")
 
@@ -372,6 +378,9 @@ async def protect_project_mutations(request: Request, call_next):
     match = re.fullmatch(r"/api/projects/([0-9a-fA-F-]{32,36})(?:/.*)?", request.url.path)
     is_delete = request.method == 'DELETE' and request.url.path.count('/') == 3
     is_clone = request.method == 'POST' and bool(re.fullmatch(r'/api/projects/[0-9a-fA-F-]{32,36}/clone',request.url.path))
+    is_restore = request.method == 'POST' and bool(re.fullmatch(r'/api/projects/[0-9a-fA-F-]{32,36}/restore/[0-9]+', request.url.path))
+    publication_only = ((request.method == 'PATCH' and request.url.path.count('/') == 3)
+        or (request.method == 'POST' and bool(re.fullmatch(r'/api/projects/[0-9a-fA-F-]{32,36}/releases/[0-9a-fA-F-]{32,36}/activate', request.url.path))))
     if not match or request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'} or is_delete or is_clone:
         return await call_next(request)
     try:
@@ -384,14 +393,26 @@ async def protect_project_mutations(request: Request, call_next):
         acquired = conn.execute("SELECT pg_try_advisory_lock_shared(hashtextextended(%s,17)) AS acquired", (project_id,)).fetchone()['acquired']
         if not acquired:
             return JSONResponse({'detail': '项目正在删除'}, status_code=409)
+        mutation_lock = False
         try:
+            # The restore task acquires the exclusive mutation lock itself.
+            # Its dispatch request must not hold a shared copy of that lock
+            # while the new worker starts and acknowledges the operation.
+            if not publication_only and not is_restore:
+                mutation_lock = conn.execute("SELECT pg_try_advisory_lock_shared(hashtextextended(%s,19)) AS acquired", (project_id,)).fetchone()['acquired']
+            if not mutation_lock and not publication_only and not is_restore and not request.url.path.endswith(('/heartbeat', '/open')):
+                return JSONResponse({'detail': '正在还原版本，请等待完成'}, status_code=409)
             row = conn.execute("SELECT status FROM projects WHERE id=%s", (project_id,)).fetchone()
             conn.commit()
             if row and row['status'] in ('deleting','cloning'):
                 return JSONResponse({'detail': '项目正在删除，请重试删除操作'}, status_code=409)
+            if row and row['status'] == 'restoring' and not publication_only and not request.url.path.endswith(('/heartbeat', '/open')):
+                return JSONResponse({'detail': '正在还原版本，需要些时间，请等待完成'}, status_code=409)
             return await call_next(request)
         finally:
             conn.rollback()
+            if mutation_lock:
+                conn.execute("SELECT pg_advisory_unlock_shared(hashtextextended(%s,19))", (project_id,))
             conn.execute("SELECT pg_advisory_unlock_shared(hashtextextended(%s,17))", (project_id,))
 app.include_router(auth_router)
 app.include_router(account_router)
@@ -420,6 +441,7 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     published: bool | None = None
+    publish_version: int | None = Field(default=None, ge=1)
     publish_slug: str | None = Field(default=None, min_length=3, max_length=63, pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
     favorite: bool | None = None
     visibility: Literal["public", "private"] | None = None
@@ -456,7 +478,7 @@ class TranscriptionRequest(BaseModel):
 
 
 class FileUpdate(BaseModel):
-    content: str = Field(max_length=120000)
+    content: str
 
 
 class FileMove(BaseModel):
@@ -541,7 +563,7 @@ def discover_projects(user=Depends(current_user)):
         rows = conn.execute("""
             SELECT id,title,kind,status,preview_html,published,created_at,updated_at,owner_id,workspace_path
             FROM projects
-            WHERE published=TRUE AND visibility='public' AND status NOT IN ('deleting','queued','running')
+            WHERE published=TRUE AND visibility='public' AND status <> 'deleting'
             ORDER BY updated_at DESC LIMIT 24
         """).fetchall()
     result = []
@@ -778,8 +800,49 @@ async def project_events(project_id: uuid.UUID, user=Depends(current_user)):
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+async def publication_control(project_id, method, payload=None, suffix=''):
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            response = await client.request(method, f'{agent_endpoint(project_id)}/projects/{project_id}/{suffix or "publication"}',
+                headers={'X-Agent-Secret': AGENT_SECRET}, json=payload or {})
+    except httpx.HTTPError as error:
+        raise HTTPException(503, '发布服务暂时不可用，请重试') from error
+    if response.status_code >= 400:
+        try:
+            detail = response.json().get('detail', '发布操作失败')
+        except ValueError:
+            detail = '发布操作失败'
+        raise HTTPException(response.status_code, detail)
+    return response.json()
+
+
+@app.get('/api/projects/{project_id}/publication')
+def publication_status(project_id: uuid.UUID, user=Depends(current_user)):
+    owned_project(project_id, user)
+    from project_publication import describe
+    with connection() as conn:
+        latest = conn.execute('SELECT * FROM project_releases WHERE project_id=%s ORDER BY created_at DESC LIMIT 1', (project_id,)).fetchone()
+        project = conn.execute('SELECT published,active_release_id FROM projects WHERE id=%s', (project_id,)).fetchone()
+    return {'publication': describe(latest), 'published': project['published'], 'active_release_id': project['active_release_id']}
+
+
+@app.get('/api/projects/{project_id}/releases')
+def publication_versions(project_id: uuid.UUID, user=Depends(current_user)):
+    owned_project(project_id, user)
+    from project_publication import describe
+    with connection() as conn:
+        releases = conn.execute('SELECT * FROM project_releases WHERE project_id=%s ORDER BY created_at DESC', (project_id,)).fetchall()
+    return {'releases': [describe(release) for release in releases]}
+
+
+@app.post('/api/projects/{project_id}/releases/{release_id}/activate')
+async def rollback_publication(project_id: uuid.UUID, release_id: uuid.UUID, user=Depends(current_user)):
+    owned_project(project_id, user)
+    return await publication_control(project_id, 'POST', suffix=f'releases/{release_id}/activate')
+
+
 @app.patch("/api/projects/{project_id}")
-def update_project(project_id: uuid.UUID, data: ProjectUpdate, user=Depends(current_user)):
+async def update_project(project_id: uuid.UUID, data: ProjectUpdate, user=Depends(current_user)):
     if data.title is not None and not data.title.strip():
         raise HTTPException(422, "项目名称不能为空")
     if data.publish_slug is not None:
@@ -793,56 +856,19 @@ def update_project(project_id: uuid.UUID, data: ProjectUpdate, user=Depends(curr
             raise HTTPException(404, "Project not found")
         if current["visibility"] == "private" and data.visibility != "public":
             raise HTTPException(409,"项目为私有，请先在项目详情中设置为公开后再发布")
-        if not current["preview_html"]:
-            raise HTTPException(409, "项目构建完成后才能发布")
-        if current["status"] in ("running", "queued") or project_lock(project_id).locked():
-            raise HTTPException(409, "请等待当前构建完成")
-        dist = project_root(project_id) / "dist"
-        if not (dist / "index.html").is_file():
-            raise HTTPException(409, "构建产物不存在，请重新构建")
-        try:
-            bucket, prefix, objects = upload_build(str(project_id), dist)
-        except Exception as error:
-            raise HTTPException(503, f"发布资源上传到 MinIO 失败：{error}") from error
-
-        new_paths = {item["path"] for item in objects}
-        new_keys = {item["path"]: item["key"] for item in objects}
-        stale_objects = []
         with connection() as conn:
-            project = conn.execute("SELECT preview_html,status FROM projects WHERE id=%s AND owner_id=%s FOR UPDATE", (project_id, user["id"])).fetchone()
-            if not project:
-                raise HTTPException(404, "Project not found")
-            if project["status"] in ("running", "queued") or project["preview_html"] != current["preview_html"]:
-                try:
-                    delete_objects(bucket, [item["key"] for item in objects])
-                except Exception:
-                    pass
-                raise HTTPException(409, "项目构建状态已变化，请等待构建完成后重新发布")
-            old_objects = conn.execute("SELECT bucket,object_key,object_path FROM published_objects WHERE project_id=%s", (project_id,)).fetchall()
-            for item in objects:
-                conn.execute("""
-                    INSERT INTO published_objects(project_id,object_path,bucket,object_key,content_type,size_bytes,etag)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT(project_id,object_path) DO UPDATE SET bucket=EXCLUDED.bucket,object_key=EXCLUDED.object_key,
-                    content_type=EXCLUDED.content_type,size_bytes=EXCLUDED.size_bytes,etag=EXCLUDED.etag,created_at=NOW()
-                """, (project_id, item["path"], item["bucket"], item["key"], item["content_type"], item["size_bytes"], item["etag"]))
-            for old in old_objects:
-                if old["object_key"] != new_keys.get(old["object_path"]):
-                    stale_objects.append(old)
-                    if old["object_path"] not in new_paths:
-                        conn.execute("DELETE FROM published_objects WHERE project_id=%s AND object_path=%s", (project_id, old["object_path"]))
-            row = conn.execute("""
-                UPDATE projects SET title=COALESCE(%s,title),favorite=COALESCE(%s,favorite),visibility=COALESCE(%s,visibility),remove_badge=COALESCE(%s,remove_badge),publish_slug=COALESCE(%s,publish_slug),published=TRUE,published_html=%s,
-                published_storage_bucket=%s,published_storage_prefix=%s,updated_at=NOW()
-                WHERE id=%s AND owner_id=%s RETURNING *
-            """, (data.title.strip() if data.title else None,data.favorite,data.visibility,data.remove_badge,data.publish_slug,project["preview_html"], bucket, prefix, project_id, user["id"])).fetchone()
-            publish_reward(conn,user)
-        try:
-            for item in stale_objects:
-                delete_objects(item["bucket"], [item["object_key"]])
-        except Exception:
-            pass
-        return project_json(row)
+            version = conn.execute('SELECT version FROM project_versions WHERE project_id=%s AND (%s::integer IS NULL OR version=%s) ORDER BY version DESC LIMIT 1',
+                                   (project_id, data.publish_version, data.publish_version)).fetchone()
+        if not version:
+            raise HTTPException(409 if data.publish_version is None else 404, '暂无可发布的构建版本' if data.publish_version is None else '所选构建版本不存在')
+        publication = await publication_control(project_id, 'POST', data.model_dump(exclude_none=True))
+        with connection() as conn:
+            row = conn.execute('SELECT * FROM projects WHERE id=%s', (project_id,)).fetchone()
+        return {**project_json(row), 'publication': publication}
+
+    if data.published is False:
+        owned_project(project_id, user)
+        await publication_control(project_id, 'DELETE')
 
     with connection() as conn:
         if data.publish_slug is not None:
@@ -863,11 +889,7 @@ def update_project(project_id: uuid.UUID, data: ProjectUpdate, user=Depends(curr
             published_storage_prefix=CASE WHEN %s IS FALSE THEN '' ELSE published_storage_prefix END,
             updated_at=NOW() WHERE id=%s AND owner_id=%s RETURNING *
         """, (data.title.strip() if data.title else None, data.published, data.favorite, data.visibility, data.remove_badge, data.publish_slug, data.published, data.published, data.published, project_id, user["id"])).fetchone()
-    for item in old_objects:
-        try:
-            delete_objects(item["bucket"], [item["object_key"]])
-        except Exception:
-            pass
+    # Release artifacts remain available for rollback; deletion cleans all versions.
     return project_json(row)
 
 
@@ -900,7 +922,7 @@ async def clone_project(project_id: uuid.UUID, data: ProjectClone, user=Depends(
                 raise HTTPException(404, 'Project not found')
             if source['owner_id'] != user['id'] and data.copy_database:
                 raise HTTPException(403, '公开项目仅允许克隆源码和数据库结构')
-            if source['status'] in ('running','queued','deleting') or project_lock(project_id).locked():
+            if source['status'] in ('running','queued','restoring','deleting') or project_lock(project_id).locked():
                 raise HTTPException(409, '请等待项目操作完成后克隆')
             await project_lock(project_id).acquire()
             locked = True
@@ -918,6 +940,8 @@ async def clone_project(project_id: uuid.UUID, data: ProjectClone, user=Depends(
                 response = await client.post(AGENT_SERVICES[0]+'/control/clone-database',headers={'X-Agent-Secret':AGENT_SECRET},json={'source':str(project_id),'target':str(target_id),'include_data':data.copy_database})
             if not response.is_success:
                 raise HTTPException(409, '数据库克隆失败，克隆项目已撤销')
+            from project_restoration import capture_version_state
+            runtime_state = await capture_version_state(target_id,target_root,source['dev_command'])
             with connection() as conn:
                 preview = (target_root/'dist'/'index.html').read_text() if (target_root/'dist'/'index.html').is_file() else ''
                 conn.execute('UPDATE projects SET status=%s,workspace_path=%s,preview_html=%s WHERE id=%s', ('ready',str(target_root.relative_to(WORKSPACE_ROOT)),preview,target_id))
@@ -925,7 +949,7 @@ async def clone_project(project_id: uuid.UUID, data: ProjectClone, user=Depends(
                     (uuid.uuid4(),target_id,f'已从「{source["title"]}」克隆当前源码'+('和数据库数据。' if data.copy_database else '和数据库结构。')+'可继续编辑或启动应用预览。'))
                 from agent import snapshot_files
                 files = snapshot_files(target_root)
-                conn.execute("INSERT INTO project_versions(project_id,version,summary,files,preview_html) VALUES(%s,1,%s,%s,%s)", (target_id,'克隆当前项目',Jsonb(files),preview))
+                conn.execute("INSERT INTO project_versions(project_id,version,summary,files,preview_html,runtime_state) VALUES(%s,1,%s,%s,%s,%s)", (target_id,'克隆当前项目',Jsonb(files),preview,Jsonb(runtime_state)))
                 row = conn.execute('SELECT * FROM projects WHERE id=%s', (target_id,)).fetchone()
             guard.execute('UPDATE projects SET discover_clones=discover_clones+1 WHERE id=%s', (project_id,))
             return project_json(row)
@@ -982,6 +1006,8 @@ async def delete_project(project_id: uuid.UUID, user=Depends(current_user)):
                 # Billing records remain account audit records; their project/job FKs
                 # become NULL, allowing outstanding real usage to settle normally.
                 from project_database import remove as remove_project_database
+                from project_state_snapshots import remove_state_snapshots
+                remove_state_snapshots(guard, project_id)
                 remove_project_database(guard, project_id)
                 role_name = project_db_role(project_id)
                 if guard.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (role_name,)).fetchone():
@@ -1210,7 +1236,7 @@ async def proxy_runtime(token: str, request: Request, path: str = ""):
             html = re.sub(r'((?:src|href|action)=["\'])/(?!/)', lambda match: match.group(1) + runtime.prefix + "/", html)
             if not re.search(r"<base\s", html, re.IGNORECASE):
                 html = re.sub(r"<head([^>]*)>", lambda match: match.group(0) + f'<base href="{runtime.prefix}/">', html, count=1, flags=re.IGNORECASE)
-        html = re.sub(r"</head\s*>", lambda match: PREVIEW_DIAGNOSTICS + match.group(0), html, count=1, flags=re.IGNORECASE)
+        html = inject_preview_diagnostics(html, PREVIEW_DIAGNOSTICS)
         response_headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms allow-modals"
         return HTMLResponse(html, status_code=upstream.status_code, headers=response_headers)
 
@@ -1278,40 +1304,7 @@ async def proxy_runtime_websocket(websocket: WebSocket, token: str, path: str = 
             pass
 
 
-PREVIEW_DIAGNOSTICS = """<script>
-(() => {
-  const send = (level, message) => parent.postMessage({type:'atoms-preview-console',level,message:String(message).slice(0,2000)}, '*');
-  const format = value => {
-    if (typeof value === 'string') return value;
-    try { return JSON.stringify(value); } catch { return String(value); }
-  };
-  for (const level of ['log','info','warn','error','debug']) {
-    const original = console[level].bind(console);
-    console[level] = (...args) => {
-      send(level, args.map(format).join(' '));
-      original(...args);
-    };
-  }
-  window.addEventListener('error', event => {
-    const message = event.message || '预览脚本加载失败';
-    send('error', message);
-    parent.postMessage({type:'atoms-preview-error',message}, '*');
-  });
-  window.addEventListener('unhandledrejection', event => {
-    const message = String(event.reason);
-    send('error', message);
-    parent.postMessage({type:'atoms-preview-error',message}, '*');
-  });
-  setTimeout(() => {
-    const root = document.getElementById('root');
-    if (root && !root.children.length) {
-      const message = '应用未挂载，请查看控制台或重新构建';
-      send('error', message);
-      parent.postMessage({type:'atoms-preview-error',message}, '*');
-    }
-  }, 4000);
-})();
-</script>"""
+from preview_diagnostics import PREVIEW_DIAGNOSTICS, inject_preview_diagnostics
 
 VISUAL_EDITOR_SCRIPT = '<script data-atoms-visual-editor>' + Path(__file__).with_name('visual_editor.js').read_text() + '</script>'
 PREVIEW_DIAGNOSTICS += VISUAL_EDITOR_SCRIPT
@@ -1329,7 +1322,7 @@ def served_asset(root, path: str, prefix: str, *, thumbnail=False):
     html = re.sub(r'((?:src|href)=["\'])/(?!/)', lambda match: match.group(1) + prefix + "/", html)
     if not re.search(r"<base\s", html, re.IGNORECASE):
         html = re.sub(r"<head([^>]*)>", lambda match: match.group(0) + f'<base href="{prefix}/">', html, count=1, flags=re.IGNORECASE)
-    html = re.sub(r"</head\s*>", lambda match: PREVIEW_DIAGNOSTICS + match.group(0), html, count=1, flags=re.IGNORECASE)
+    html = inject_preview_diagnostics(html, PREVIEW_DIAGNOSTICS)
     if thumbnail:
         html = thumbnail_document(html)
     headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms allow-modals"
@@ -1375,21 +1368,39 @@ def project_versions(project_id: uuid.UUID, user=Depends(current_user)):
     return list_versions(project_id)
 
 
-@app.post("/api/projects/{project_id}/restore/{version}")
-async def restore_project_version(project_id: uuid.UUID, version: int, user=Depends(current_user)):
+@app.post("/api/projects/{project_id}/restore/{version}", status_code=202)
+async def restore_project_version(project_id: uuid.UUID, version: int, request: Request, user=Depends(current_user)):
     project = owned_project(project_id, user)
-    if project["status"] in ("running", "queued") or project_lock(project_id).locked():
+    # An old tab treats a task ACK as a complete project and loses messages.
+    # Reject before scheduling instead of crashing or claiming false success.
+    if request.headers.get('X-Atoms-Restore-Protocol') != '2':
+        raise HTTPException(409, '当前工作页版本已更新，请刷新页面后再还原；本次未提交还原任务')
+    if project["status"] in ("running", "queued", "restoring") or project_lock(project_id).locked():
         raise HTTPException(409, "请等待当前任务结束")
-    restored = await agent_invoke(project_id, "restore", {"version": version})
-    result = get_project(project_id, user)
-    result["restored_version"] = restored["version"]
-    # Start the restored source once and register its actual preview route here.
-    # A preview failure must not conceal that source restoration already succeeded.
+    from restoration_messages import create_messages, update_message
+    identity=uuid.uuid4()
+    with connection() as conn:
+        create_messages(conn,project_id,identity,version)
+        update_message(conn,project_id,identity=identity,phase='正在重建运行环境')
     try:
-        result["restored_preview"] = await launch_project_runtime(project_id, RuntimeRequest(restart=True), user)
-    except HTTPException as error:
-        result["restore_preview_error"] = str(error.detail)
-    return result
+        return await agent_invoke(project_id, "restore", {"version": version,"restoration_id":str(identity)})
+    except HTTPException as exc:
+        with connection() as conn:
+            accepted=conn.execute('SELECT 1 FROM project_restores WHERE project_id=%s AND id=%s',(project_id,identity)).fetchone()
+            if not accepted:
+                update_message(conn,project_id,identity=identity,status='failed',phase='还原请求未受理',error=str(exc.detail))
+        raise
+
+
+@app.get("/api/projects/{project_id}/restore")
+async def project_restore_status(project_id: uuid.UUID, user=Depends(current_user)):
+    owned_project(project_id, user)
+    with connection() as conn:
+        row = conn.execute('SELECT id,version,status,phase,error,result,updated_at FROM project_restores WHERE project_id=%s', (project_id,)).fetchone()
+    if not row:
+        return {'restore': None}
+    operation = {**row, 'id': str(row['id']), 'updated_at': row['updated_at'].isoformat()}
+    return {'restore': operation}
 
 
 @app.get("/api/projects/{project_id}/files")
@@ -1519,21 +1530,13 @@ def download_user_project_entry(project_id: uuid.UUID, workspace_id: uuid.UUID, 
         raise HTTPException(404, "文件或文件夹不存在")
     if target.is_file():
         return FileResponse(target, media_type="application/octet-stream", filename=target.name)
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
-        for child in target.rglob("*"):
-            if child.is_symlink() or not child.is_file():
-                continue
-            if ".atoms" in child.relative_to(root).parts:
-                continue
-            try:
-                workspace_safe_file(root, child.relative_to(root).as_posix())
-            except ValueError:
-                continue
-            archive.write(child, child.relative_to(target.parent).as_posix())
-    stream.seek(0)
-    archive_name = f"{target.name}.zip"
-    return StreamingResponse(stream, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(archive_name)}"})
+    from project_snapshots import archive_response
+    def entries():
+        for name in workspace_files(root):
+            child = workspace_safe_file(root, name)
+            if child.is_relative_to(target) and ".atoms" not in child.relative_to(root).parts:
+                yield child, child.relative_to(target.parent).as_posix()
+    return archive_response(root, entries(), f"{target.name}.zip")
 
 
 @app.get("/api/projects/{project_id}/search")
@@ -1626,15 +1629,8 @@ async def upload_user_project_file(project_id: uuid.UUID, workspace_id: uuid.UUI
         target = workspace_safe_file(root, path)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    chunks = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > 5_000_000:
-            raise HTTPException(413, "单个文件不能超过 5 MB")
-        chunks.append(chunk)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"".join(chunks))
+    from project_snapshots import receive_upload
+    size = await receive_upload(request, target)
     set_workspace_owner(root, project_uid(workspace_id))
     with connection() as conn:
         conn.execute("UPDATE projects SET updated_at=NOW() WHERE id=%s", (workspace_id,))
@@ -1651,15 +1647,8 @@ async def upload_project_file(project_id: uuid.UUID, path: str, request: Request
         target = workspace_safe_file(root, path)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    chunks = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > 5_000_000:
-            raise HTTPException(413, "单个文件不能超过 5 MB")
-        chunks.append(chunk)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"".join(chunks))
+    from project_snapshots import receive_upload
+    size = await receive_upload(request, target)
     set_workspace_owner(root, project_uid(project_id))
     return {"path": str(target.relative_to(root)), "size": size}
 
@@ -1674,15 +1663,8 @@ async def upload_project_asset(project_id: uuid.UUID, path: str, request: Reques
         target = workspace_safe_file(root, f"public/uploads/{path}")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    chunks = []
-    size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > 5_000_000:
-            raise HTTPException(413, "文件不能超过 5 MB")
-        chunks.append(chunk)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"".join(chunks))
+    from project_snapshots import receive_upload
+    size = await receive_upload(request, target)
     set_workspace_owner(root, project_uid(project_id))
     return {"path": str(target.relative_to(root)), "size": size}
 
@@ -1777,17 +1759,15 @@ def download_project_artifact(project_id: uuid.UUID, path: str = Query(min_lengt
 @app.get("/api/projects/{project_id}/archive")
 def project_archive(project_id: uuid.UUID, user=Depends(current_user)):
     owned_project(project_id, user)
-    stream = io.BytesIO()
+    from project_snapshots import archive_response
     root = ensure_workspace(project_id)
-    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+    def entries():
         for name in workspace_files(root):
-            if ".atoms" in Path(name).parts:
-                continue
-            archive.write(workspace_safe_file(root, name), name)
+            if ".atoms" not in Path(name).parts:
+                yield workspace_safe_file(root, name), name
         for entry in artifacts(root):
-            archive.write(artifact_file(root, entry['path']), entry['path'])
-    stream.seek(0)
-    return StreamingResponse(stream, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename=atoms-{project_id.hex[:8]}.zip"})
+            yield artifact_file(root, entry['path']), entry['path']
+    return archive_response(root, entries(), f"atoms-{project_id.hex[:8]}.zip")
 
 
 @app.get('/api/sites/{slug}')
@@ -1801,15 +1781,18 @@ def public_alias(slug: str):
 
 @app.get("/api/public/{project_id}", response_class=HTMLResponse)
 @app.get("/api/public/{project_id}/", response_class=HTMLResponse)
-def public_project(project_id: uuid.UUID, request: Request):
+async def public_project(project_id: uuid.UUID, request: Request):
     with connection() as conn:
         row = conn.execute("""
-            SELECT p.published_html,p.published_storage_bucket,p.remove_badge,o.bucket,o.object_key,o.content_type
+            SELECT p.published_html,p.published_storage_bucket,p.remove_badge,o.bucket,o.object_key,o.content_type,r.manifest
             FROM projects p LEFT JOIN published_objects o ON o.project_id=p.id AND o.object_path='index.html'
+            LEFT JOIN project_releases r ON r.id=p.active_release_id
             WHERE p.id=%s AND p.published=TRUE AND p.visibility='public'
         """, (project_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Published project not found")
+    if row['manifest'] and row['manifest'].get('dynamic'):
+        return await forward_published_page(project_id, '', request)
     if row["object_key"]:
         try:
             stored = open_object(row["bucket"], row["object_key"])
@@ -1827,6 +1810,20 @@ def public_project(project_id: uuid.UUID, request: Request):
     if (published / "index.html").exists():
         return public_page_response((published / "index.html").read_text(errors='replace'), project_id, request)
     return public_page_response(row["published_html"], project_id, request)
+
+
+async def forward_published_page(project_id, path, request):
+    validate_public_path(path)
+    response = await forward_http(request,
+        f'{agent_endpoint(project_id)}/projects/{project_id}/published/{quote(path, safe="/")}',
+        {'X-Agent-Secret': AGENT_SECRET}, project_authorization=request.headers.get('authorization', ''))
+    if 'text/html' in response.headers.get('content-type', '') and response.status_code == 200:
+        chunks = bytearray()
+        async for chunk in response.body_iterator:
+            chunks.extend(chunk if isinstance(chunk, bytes) else chunk.encode())
+        return public_page_response(chunks.decode('utf-8', errors='replace'), project_id, request)
+    response.headers.update(PUBLIC_API_HEADERS)
+    return response
 
 
 @app.get("/api/public/{project_id}/cover")
@@ -1856,13 +1853,7 @@ PUBLIC_API_HEADERS = {'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'no-store', 'Vary': 'Access-Control-Request-Headers'}
 
 
-@app.api_route('/api/public/{project_id}/api/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
-async def public_api(project_id: uuid.UUID, path: str, request: Request):
-    # Gate every method, including preflight, before touching the worker.
-    with connection() as conn:
-        project = conn.execute("SELECT dev_command FROM projects WHERE id=%s AND published=TRUE AND visibility='public'", (project_id,)).fetchone()
-    if not project:
-        raise HTTPException(404, 'Published project not found')
+def validate_public_path(path):
     from urllib.parse import unquote
     decoded = path
     for _ in range(10):
@@ -1873,24 +1864,24 @@ async def public_api(project_id: uuid.UUID, path: str, request: Request):
     if ('\\' in decoded or any(part in ('.', '..') for part in decoded.split('/'))
             or any(ord(character) < 32 for character in decoded)):
         raise HTTPException(422, '无效的项目接口路径')
+
+
+@app.api_route('/api/public/{project_id}/api/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'])
+async def public_api(project_id: uuid.UUID, path: str, request: Request):
+    # Gate every method, including preflight, before touching the worker.
+    with connection() as conn:
+        project = conn.execute("SELECT dev_command FROM projects WHERE id=%s AND published=TRUE AND visibility='public'", (project_id,)).fetchone()
+    if not project:
+        raise HTTPException(404, 'Published project not found')
+    validate_public_path(path)
     # Imported here to avoid a main -> preview_gateway -> main cycle.
     from preview_gateway import project_cors_headers
     headers = {**PUBLIC_API_HEADERS, 'Access-Control-Allow-Headers': project_cors_headers(request.scope)}
     if request.method == 'OPTIONS':
         return Response(status_code=204, headers=headers)
     try:
-        status = (await agent_invoke(project_id, 'runtime_status')).get('status') or {}
-        result = status if status.get('running') else await agent_invoke(project_id, 'runtime_start', {'command': project['dev_command'], 'restart': False})
-    except HTTPException as error:
-        return JSONResponse({'detail': error.detail}, status_code=error.status_code, headers=headers)
-    match = re.fullmatch(r'/api/runtime/([A-Za-z0-9_-]{20,128})/', result.get('url', ''))
-    if not match:
-        return JSONResponse({'detail': '项目后端服务尚未就绪'}, status_code=503, headers=headers)
-    # Only application Bearer credentials reach the app. Platform cookies and
-    # control-plane headers are removed by the shared forwarding layer.
-    try:
         response = await forward_http(request,
-            f'{agent_endpoint(project_id)}/projects/{project_id}/preview/{match[1]}/api/{quote(path, safe="/")}',
+            f'{agent_endpoint(project_id)}/projects/{project_id}/published/api/{quote(path, safe="/")}',
             {'X-Agent-Secret': AGENT_SECRET}, project_authorization=request.headers.get('authorization', ''))
     except HTTPException as error:
         return JSONResponse({'detail': error.detail}, status_code=error.status_code, headers=headers)
@@ -1901,15 +1892,20 @@ async def public_api(project_id: uuid.UUID, path: str, request: Request):
     return response
 
 
-@app.get("/api/public/{project_id}/{path:path}")
-def public_asset(project_id: uuid.UUID, path: str, request: Request):
+@app.api_route("/api/public/{project_id}/{path:path}", methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD'])
+async def public_asset(project_id: uuid.UUID, path: str, request: Request):
+    validate_public_path(path)
     with connection() as conn:
         row = conn.execute("""
             SELECT o.bucket,o.object_key,o.content_type,o.size_bytes,o.etag
             FROM projects p JOIN published_objects o ON o.project_id=p.id
             WHERE p.id=%s AND p.published=TRUE AND p.visibility='public' AND o.object_path=%s
         """, (project_id, path)).fetchone()
-        project = conn.execute("SELECT published_storage_bucket FROM projects WHERE id=%s AND published=TRUE AND visibility='public'", (project_id,)).fetchone()
+        project = conn.execute("SELECT p.published_storage_bucket,r.manifest FROM projects p LEFT JOIN project_releases r ON r.id=p.active_release_id WHERE p.id=%s AND p.published=TRUE AND p.visibility='public'", (project_id,)).fetchone()
+    if not project:
+        raise HTTPException(404, "Published project not found")
+    if project['manifest'] and (project['manifest'].get('dynamic') or request.method not in {'GET', 'HEAD'}):
+        return await forward_published_page(project_id, path, request)
     if row:
         try:
             stored = open_object(row["bucket"], row["object_key"])
@@ -1940,7 +1936,7 @@ def public_asset(project_id: uuid.UUID, path: str, request: Request):
     if not project:
         raise HTTPException(404, "Published project not found")
     if not Path(path).suffix and 'text/html' in request.headers.get('accept', ''):
-        return public_project(project_id, request)
+        return await public_project(project_id, request)
     if project["published_storage_bucket"]:
         raise HTTPException(404, "Published asset not found")
     legacy_root = project_root(project_id) / "published"
@@ -1950,6 +1946,31 @@ def public_asset(project_id: uuid.UUID, path: str, request: Request):
             return public_page_response(target.read_text(errors='replace'), project_id, request)
         return served_asset(legacy_root, path, f"/api/public/{project_id}")
     raise HTTPException(404, "Published asset not found")
+
+
+@app.api_route('/api/public/{project_id}', methods=['POST','PUT','PATCH','DELETE','OPTIONS','HEAD'])
+async def public_root_method(project_id: uuid.UUID, request: Request):
+    if request.method == 'HEAD':
+        return await public_project(project_id, request)
+    return await public_asset(project_id, '', request)
+
+
+@app.websocket('/api/public/{project_id}/{path:path}')
+async def public_socket(socket: WebSocket, project_id: uuid.UUID, path: str):
+    try:
+        validate_public_path(path)
+        with connection() as conn:
+            allowed = conn.execute("SELECT 1 FROM projects WHERE id=%s AND published=TRUE AND visibility='public' AND active_release_id IS NOT NULL", (project_id,)).fetchone()
+        if not allowed:
+            await socket.close(code=1008)
+            return
+        headers = {'X-Agent-Secret': AGENT_SECRET}
+        if socket.headers.get('authorization'):
+            headers['Authorization'] = socket.headers['authorization']
+        await forward_websocket(socket,
+            f'{agent_endpoint(project_id).replace("http://", "ws://").replace("https://", "wss://")}/projects/{project_id}/published/{quote(path, safe="/")}', headers)
+    except HTTPException:
+        await socket.close(code=1008)
 
 
 @app.patch("/api/projects/{project_id}/experts")

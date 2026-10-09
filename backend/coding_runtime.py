@@ -295,8 +295,33 @@ class ModelGateway:
     async def chat(self, client: httpx.AsyncClient, state: AgentState, messages: list[dict],
                    tools: list[dict] | None = None, max_tokens: int | None = None,
                    reasoning: dict | None = None) -> dict:
+        pending = (self.session.state.get('pending_model') or {}) if self.session and os.getenv('WORKER_TOKEN') else {}
+        if pending.get('job_id') != active_job.get() or not pending.get('payload'):
+            pending = {}
+        if pending and pending['payload'].get('_billing_stage') != state.value:
+            # Reconcile the exact old request before preflighting the NEW stage.
+            # Resume instructions may be large; they cannot prevent settlement
+            # of a valid request or authorize executing its old proposed tools.
+            original = copy.deepcopy(pending['payload'])
+            old_stage = AgentState(original['_billing_stage'])
+            recovered = await self.chat(client, old_stage, copy.deepcopy(original['messages']),
+                                        tools=original.get('tools'),
+                                        max_tokens=original.get('max_tokens') or model_output_limit(self.model_for(old_stage), old_stage),
+                                        reasoning=original.get('reasoning'))
+            self.session.save('recovered_model_response', {
+                'request_id': original['_billing_request'], 'stage': original['_billing_stage'],
+                'response': recovered, 'proposed_tools_executed': False})
+            pending = {}
         if max_tokens is None:
             max_tokens = model_output_limit(self.model_for(state), state)
+        from agent_session import estimate_tokens
+        from model_catalog import catalog
+        context = next((int(item['context']) for item in catalog() if item['id'] == self.model_for(state)), 128000)
+        available = context - estimate_tokens(messages, tools) - 4000
+        if available < 512 and not pending:
+            raise ModelContextOverflow('当前输入超过模型上下文可用范围，需压缩活动上下文后重试。')
+        if not pending:
+            max_tokens = min(max_tokens, available)
         payload: dict = {"model": self.model_for(state), "messages": messages, "max_tokens": max_tokens, "stream": True}
         if tools:
             payload.update({"tools": tools, "tool_choice": "auto"})
@@ -314,32 +339,16 @@ class ModelGateway:
             payload['session_id'] = (self.session.cache_identity(state.value) if self.session else
                                      f'atoms:{self.cache_scope}:planning')
         if os.getenv('WORKER_TOKEN'):
-            identifier = (self.session.request_id(payload, state.value, active_job.get())
-                          if self.session else str(uuid.uuid4()))
+            identifier = (pending['payload']['_billing_request'] if pending else
+                          self.session.request_id(payload, state.value, active_job.get()) if self.session else str(uuid.uuid4()))
             payload.update({'_billing_request': identifier, '_billing_stage': state.value})
-            pending = (self.session.state.get('pending_model') or {}) if self.session else {}
-            if pending.get('job_id') == active_job.get() and pending.get('payload'):
-                if pending['payload'].get('_billing_stage') != state.value:
-                    # A checkpoint can outlive a settled response when stopped
-                    # between gateway settlement and the local clear. Recover
-                    # its exact identity before changing stages. Proposed tools
-                    # are archived, never executed in a different workflow.
-                    original = copy.deepcopy(pending['payload'])
-                    recovered = await self.chat(client, AgentState(original['_billing_stage']),
-                                                copy.deepcopy(original['messages']),
-                                                original.get('tools'), original.get('max_tokens') or
-                                                model_output_limit(self.model_for(AgentState(original['_billing_stage'])),
-                                                                   AgentState(original['_billing_stage'])))
-                    self.session.save('recovered_model_response', {
-                        'request_id': original['_billing_request'], 'stage': original['_billing_stage'],
-                        'response': recovered, 'proposed_tools_executed': False})
-                    pending = {}
+            if pending:
                 # Resuming a job adds checkpoint instructions to its context.
                 # They must not create a NEW generation when the old request
                 # may still be in flight. Replay its exact payload/identity.
-                if pending:
-                    payload = copy.deepcopy(pending['payload'])
-                    messages[:] = copy.deepcopy(payload['messages'])
+                payload = copy.deepcopy(pending['payload'])
+                messages[:] = copy.deepcopy(payload['messages'])
+                max_tokens = payload.get('max_tokens', max_tokens)
 
         def pending_checkpoint(clear=False):
             if self.session and os.getenv('WORKER_TOKEN'):
@@ -480,9 +489,8 @@ def retrieve_context(root: Path, paths: list[str], request: str, max_files: int 
     for name in paths[:3000]:
         path = root / name
         try:
-            if path.stat().st_size > 120_000:
-                continue
-            content = path.read_text()
+            with path.open(encoding='utf-8') as stream:
+                content = stream.read(12000)
         except (OSError, UnicodeError):
             continue
         if "\x00" in content:
@@ -517,8 +525,6 @@ def symbol_search(root: Path, paths: list[str], query: str) -> str:
         if not name.endswith((".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs")):
             continue
         try:
-            if (root / name).stat().st_size > 120_000:
-                continue
             lines = (root / name).read_text().splitlines()
         except (OSError, UnicodeError):
             continue
@@ -589,7 +595,9 @@ def apply_unified_patch(root: Path, name: str, patch: str, read_file: Callable,
 
 
 def changed_diff(before: dict, after: dict, max_chars: int = 18000) -> str:
-    changed_names = [name for name in set(before) | set(after) if before.get(name) != after.get(name) and not name.startswith(".atoms/")]
+    from agent_session import inventory
+    old_hashes, new_hashes = inventory(before), inventory(after)
+    changed_names = [name for name in set(before) | set(after) if old_hashes.get(name) != new_hashes.get(name) and not name.startswith(".atoms/")]
     source_names = [name for name in changed_names if not name.endswith(
         ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.tsbuildinfo"))]
     source_names.sort(key=lambda name: (
@@ -604,7 +612,7 @@ def changed_diff(before: dict, after: dict, max_chars: int = 18000) -> str:
         old = before.get(name, "")
         new = after.get(name, "")
         if not isinstance(old, str) or not isinstance(new, str):
-            sections.append(f"{name}: binary file changed")
+            sections.append(f"{name}: large or binary file changed; use scoped source reads for text")
             continue
         lines = list(difflib.unified_diff(old.splitlines(), new.splitlines(),
                                           fromfile=f"a/{name}", tofile=f"b/{name}", lineterm=""))

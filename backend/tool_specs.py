@@ -28,11 +28,11 @@ def complete_specs(tools):
         'include':'Optional filename glob; empty string means all indexed source files. Example frontend/src/**/*.tsx.',
         'pattern':'Nonempty filename glob, not regex or shell command. Example **/*auth*.',
         'regex':'Boolean true enables Python regular-expression search; default false means literal text. Invalid regex is rejected.',
-        'content':'Complete UTF-8 text, no NUL; empty string is allowed to create an empty file. Hard limit 120000 UTF-8 bytes per file; suggested generated source batch <=12000 characters is guidance, not a hard limit.',
+        'content':'Complete UTF-8 text, no NUL; empty string is allowed to create an empty file. Prefer focused patches for large existing files; suggested generated source batch <=12000 characters is guidance, not a file size limit.',
         'old':'Nonempty exact text occurring exactly once in the current file; no regex/fuzzy matching. Read current source first.',
         'new':'Exact replacement text; empty string deletes the matching old block.',
         'patch':'Nonempty unified diff or unique exact-context @@ hunks. Prefix each hunk line with space, + or -. No fuzzy matching, no multi-file patch; path identifies one existing file.',
-        'command':'Noninteractive Bash command, 1–2000 characters, not whitespace-only, no NUL. Runs in project root with pipefail. Long-lived services use workspace dev/services and runtime_check. Nonzero exit is real failure evidence.',
+        'command':'Noninteractive Bash command, 1–2000 characters, not whitespace-only, no NUL. Runs in project root with errexit and pipefail: failed assertions stop the command. Use if/|| explicitly for expected failures. Long-lived services use workspace dev/services and runtime_check. Nonzero exit is real failure evidence.',
         'requirement_ids':'Optional unique requirement IDs copied from get_tasks/current plan; only actual checked requirements. Unknown IDs are rejected; omit or [] for observations not proving acceptance.',
         'evidence_ids':'Unique real successful verification IDs from execution tools/get_tasks. status=done requires at least one fresh relevant ID; never invent IDs.',
         'note':'Optional factual progress text, at most 8000 characters; a note is not proof of completion.',
@@ -69,8 +69,7 @@ def complete_specs(tools):
                 if field in ('path','directory','pattern','include','selector','source_selector'):
                     node['maxLength']=2048
                 if field in ('content','old','new','patch'):
-                    node['maxLength']=120000
-                if field=='content':node['x-maxUtf8Bytes']=120000
+                    node.pop('maxLength', None)
                 if field in ('id','output_id'):node['maxLength']=128
                 if field=='command':node['maxLength']=2000
                 if field not in ('content','new','value','include','note','service'):

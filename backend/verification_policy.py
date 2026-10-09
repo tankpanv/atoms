@@ -110,7 +110,11 @@ def inspect_sources(files):
     """Deterministic structural checks; generated tests cannot gate delivery."""
     issues = []
     checked = 0
-    for name, content in files.items():
+    from project_snapshots import text_content
+    for name in files:
+        if not name.endswith('.py') and Path(name).name not in ('package.json', '.atoms-workspace.json', 'tsconfig.json'):
+            continue
+        content = text_content(files, name)
         if not isinstance(content, str) or name.startswith('.atoms/') or unit_test_path(name):
             continue
         try:

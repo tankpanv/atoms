@@ -27,6 +27,6 @@ COPY . .
 # performed by the selected harness tier against the current source/runtime;
 # running the entire historical unit-test suite here made every worker image
 # rebuild slow and allowed stale assertions to block deployment.
-RUN PYTHONPATH=/app python -m compileall -q agent.py agent_service.py agent_harness.py build_tiers.py build_tools.py
+RUN PYTHONPATH=/app python -m compileall -q agent.py agent_service.py agent_harness.py build_tiers.py build_tools.py project_publication.py release_artifacts.py release_runner.py release_build.py release_versions.py published_database.py
 RUN chmod -R a+rX /app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
