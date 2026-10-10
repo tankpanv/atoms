@@ -754,7 +754,7 @@ def preferred_context_tokens(model_window, complexity_level=None):
     return max(32000, model_window - 14000)
 
 
-async def phase_chat(session, gateway, client, state, messages, tools, phase_name, phase, max_tokens):
+async def phase_chat(session, gateway, client, state, messages, tools, phase_name, phase, max_tokens, before_call=None):
     from model_catalog import catalog
     selected = gateway.model_for(state) if hasattr(gateway, 'model_for') else ''
     window = next((m['context'] for m in catalog() if m['id'] == selected), 128000)
@@ -769,6 +769,8 @@ async def phase_chat(session, gateway, client, state, messages, tools, phase_nam
     session.save_phase(phase_name, phase)
     options = ({'reasoning': {'effort': 'low'}} if phase_name == 'planning' and (phase.get('incremental') or phase.get('synthesis'))
                and 'openrouter.ai' in getattr(gateway, 'base_url', '') else {})
+    if before_call:
+        max_tokens = before_call(messages, tools, max_tokens)
     try:
         return await gateway.chat(client, state, messages, tools, max_tokens=max_tokens, **options)
     except ModelContextOverflow:
@@ -778,6 +780,8 @@ async def phase_chat(session, gateway, client, state, messages, tools, phase_nam
         messages[:] = reduced
         phase['messages'] = messages
         session.save_phase(phase_name, phase)
+        if before_call:
+            max_tokens = before_call(messages, tools, max_tokens)
         return await gateway.chat(client, state, messages, tools, max_tokens=max_tokens, **options)
 
 
@@ -1923,7 +1927,7 @@ async def run_agent(project_id: uuid.UUID, prompt: str, model: str,
 
 
 async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_context: str = "",
-                    on_step: Callable | None = None, history: list[dict] | None = None, expert_context: str = "", build_tier: str = "normal", enabled_tools: list[str] | None = None, resume_planning: bool = False):
+                    on_step: Callable | None = None, history: list[dict] | None = None, expert_context: str = "", build_tier: str = "normal", enabled_tools: list[str] | None = None, resume_planning: bool = False, initial_tokens: int | None = None):
     build_tier = normalize_tier(build_tier)
     root = ensure_workspace(project_id)
     gateway = ModelGateway(model, (lambda state, metrics: on_step(
@@ -2001,6 +2005,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
             phase['last_error'] = previous.get('last_error', '')
     phase['context_key'] = context_key
     phase['request'] = prompt
+    phase['build_tier'] = build_tier
     phase['incremental'] = bool(baseline)
     # Keep a normal plan compact in content, while reserving enough completion
     # budget for one complete JSON object instead of an avoidable retry.
@@ -2035,7 +2040,7 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
     async with httpx.AsyncClient(timeout=180) as client:
         read_rounds = exploration_limit(bool(baseline)) if exploration_tools else 0
         from planning_recovery import PlanningRecovery
-        recovery = PlanningRecovery(session, phase, read_rounds, bool(exploration_tools))
+        recovery = PlanningRecovery(session, phase, read_rounds, bool(exploration_tools), initial_tokens=initial_tokens)
         announced_mode = None
         while True:
             active_tools = exploration_tools if recovery.tools_enabled() else []
@@ -2044,7 +2049,6 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
                 if on_step:
                     on_step('result', '正在形成增量计划' if baseline else '正在形成实现计划', '复用已确认的源码观察，将当前需求整理为可执行任务与验收步骤。')
             announced_mode = recovery.mode
-            recovery.before_call(messages, active_tools)
             phase['messages'] = messages
             session.save_phase('planning', phase)
             # Planning is a bounded handoff, not a second implementation
@@ -2059,7 +2063,8 @@ async def make_plan(project_id: uuid.UUID, prompt: str, model: str, media_contex
             plan_ceiling = model_output_limit(gateway.model_for(AgentState.PLAN) if hasattr(gateway, 'model_for') else model, AgentState.PLAN)
             response = await phase_chat(session, gateway, client, AgentState.PLAN, messages, active_tools, 'planning', phase,
                                         min(plan_ceiling,
-                                            int(phase.get('output_budget', plan_ceiling))))
+                                            int(phase.get('output_budget', plan_ceiling))),
+                                        before_call=recovery.before_call)
             recovery.record_response(response)
             phase['last_response_meta'] = response.get('_response_meta', {})
             calls = response.get('tool_calls') or []

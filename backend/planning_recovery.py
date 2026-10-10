@@ -32,7 +32,7 @@ class PlanningRecovery:
     Limits are a final safety net. Ordinary errors are repaired in the same
     conversation with real tools and a candidate that can be patched in place.
     """
-    def __init__(self, session, phase, discovery_rounds, has_tools):
+    def __init__(self, session, phase, discovery_rounds, has_tools, *, initial_tokens=None):
         self.session, self.phase = session, phase
         self.discovery_rounds, self.has_tools = discovery_rounds, has_tools
         state = phase.setdefault('recovery', {})
@@ -43,6 +43,10 @@ class PlanningRecovery:
         state.setdefault('job_id', job)
         state.setdefault('calls', 0)
         state.setdefault('tokens', 0)
+        if initial_tokens is not None:
+            # Job usage is authoritative on recovery, including earlier vision
+            # calls. Project history never contributes to this counter.
+            state['tokens'] = int(initial_tokens)
         state.setdefault('started_at', time.time())
         state.setdefault('discovery_calls', 0)
         state.setdefault('facts', [])
@@ -61,6 +65,10 @@ class PlanningRecovery:
             if has_tools and new_job:
                 state.update(mode='evidence', evidence_calls_left=2)
         self.state = state
+        from build_tiers import tier_budget_limits
+        task_limit = tier_budget_limits(phase.get('build_tier'))['token_limit']
+        configured = os.getenv('AGENT_PLANNING_MAX_TOKENS', '').strip()
+        self.token_limit = min(task_limit, int(configured)) if configured else task_limit
 
     @property
     def mode(self):
@@ -73,23 +81,31 @@ class PlanningRecovery:
             self.state['mode'] = 'synthesis'
         return self.has_tools and self.mode in {'explore', 'evidence'}
 
-    def before_call(self, messages, tools):
+    def before_call(self, messages, tools, max_tokens=None):
         self.input_tokens = estimate_tokens(messages, tools)
+        remaining = self.token_limit - self.state['tokens'] - self.input_tokens
         reason = None
         if self.state['calls'] >= int(os.getenv('AGENT_PLANNING_MAX_CALLS', '16')):
             reason = '达到规划模型调用预算'
-        elif self.state['tokens'] + self.input_tokens + 512 > int(os.getenv('AGENT_PLANNING_MAX_TOKENS', '240000')):
-            reason = '达到规划 token 预算'
+        elif remaining < 512:
+            reason = (f'达到本次对话的规划 token 预算（已用 {self.state["tokens"]:,}，'
+                      f'预计输入 {self.input_tokens:,}，上限 {self.token_limit:,}）')
         elif time.time() - self.state['started_at'] >= int(os.getenv('AGENT_PLANNING_TIMEOUT_SECONDS', '480')):
             reason = '达到规划时间预算'
         if reason:
             self.pause(reason)
         self.phase['synthesis'] = not bool(tools)
+        return min(max_tokens, remaining) if max_tokens is not None else remaining
 
     def record_response(self, response):
         self.state['calls'] += 1
         meta = response.get('_response_meta', {})
-        self.state['tokens'] += self.input_tokens + (meta.get('completion_tokens') or estimate_tokens([response]))
+        actual = meta.get('total_tokens')
+        if not isinstance(actual, int) or isinstance(actual, bool) or actual < 0:
+            prompt = meta.get('prompt_tokens', self.input_tokens)
+            completion = meta.get('completion_tokens')
+            actual = prompt + (completion if isinstance(completion, int) else estimate_tokens([response]))
+        self.state['tokens'] += actual
         self.phase['rounds'] = self.phase.get('rounds', 0) + 1
         if response.get('tool_calls'):
             if self.mode == 'explore':

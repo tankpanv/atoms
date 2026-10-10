@@ -328,6 +328,8 @@ class StreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call['function']['name'], 'write_file')
         self.assertEqual(json.loads(call['function']['arguments']), {'path': 'hello.py', 'content': 'print(1)'})
         self.assertEqual(usage[0]['total_tokens'], 30)
+        self.assertEqual(result['_response_meta']['prompt_tokens'], 10)
+        self.assertEqual(result['_response_meta']['total_tokens'], 30)
 
     async def test_incomplete_stream_never_returns_executable_tool_calls(self):
         requests = []

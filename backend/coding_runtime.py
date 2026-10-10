@@ -537,6 +537,10 @@ class ModelGateway:
                                     'reasoning_tokens': ((data.get('usage') or {}).get('completion_tokens_details') or {}).get('reasoning_tokens', 0),
                                     'content_chars': len(message.get('content') or ''),
                                     'max_tokens': max_tokens}
+        usage = data.get('usage') or {}
+        if isinstance(usage.get('prompt_tokens'), int) and isinstance(usage.get('completion_tokens'), int):
+            message['_response_meta']['prompt_tokens'] = usage['prompt_tokens']
+            message['_response_meta']['total_tokens'] = usage['prompt_tokens'] + usage['completion_tokens']
         if message.get('reasoning_details'):
             message.pop('reasoning', None)
             message.pop('reasoning_content', None)

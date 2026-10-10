@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from agent import make_plan
+from agent import make_plan, phase_chat
 from agent_session import AgentSession, digest
 from billing_context import active_job
 from code_locator import CodeLocator, ChangeMapError, validate_change_map
@@ -16,6 +16,7 @@ from incremental_planning import assemble_plan
 from planning_recovery import (PlanningRecovery, PlanningCheckpointReached,
                                merge_patch, unfinished_planning_request)
 from project_templates import planner_contract
+from coding_runtime import AgentState
 from test_agent_execution import cli_plan, calls
 
 
@@ -185,6 +186,83 @@ class PlanningRecoveryTests(unittest.IsolatedAsyncioTestCase):
         recovery.observe('read_file', {'path': 'greet.py'}, 'full source', versions)
         recovery.observe('read_file', {'path': 'greet.py'}, 'already read; unchanged', versions)
         self.assertEqual(len(recovery.state['facts']), 1)
+
+    def test_new_user_message_resets_budget_but_same_job_resume_keeps_usage(self):
+        session = AgentSession(self.root)
+        phase = session.phase('planning', 'same-goal', [])
+        token = active_job.set('first-message')
+        try:
+            first = PlanningRecovery(session, phase, 3, True)
+            first.state.update(calls=16, tokens=15000000)
+            resumed = PlanningRecovery(session, phase, 3, True)
+            self.assertEqual(resumed.state['tokens'], 15000000)
+            with self.assertRaises(PlanningCheckpointReached):
+                resumed.before_call([], [])
+        finally:
+            active_job.reset(token)
+        token = active_job.set('second-message')
+        try:
+            next_message = PlanningRecovery(session, phase, 3, True)
+            self.assertEqual(next_message.state['tokens'], 0)
+            self.assertEqual(next_message.state['calls'], 0)
+            next_message.before_call([], [])
+        finally:
+            active_job.reset(token)
+
+    def test_default_planning_budget_uses_this_job_tier_and_not_legacy_240k(self):
+        session = AgentSession(self.root)
+        with patch.dict('os.environ', {'AGENT_MAX_TOKENS': '15000000', 'AGENT_PLANNING_MAX_TOKENS': '',
+                                       'AGENT_BUILD_DEEP_MULTIPLIER': '2'}):
+            phase = session.phase('planning', 'test', [])
+            recovery = PlanningRecovery(session, phase, 3, True)
+            recovery.state['tokens'] = 213054
+            recovery.before_call([{'role': 'user', 'content': '中' * 46350}], [])
+            self.assertEqual(recovery.token_limit, 15000000)
+            phase['build_tier'] = 'deep'
+            self.assertEqual(PlanningRecovery(session, phase, 3, True).token_limit, 30000000)
+
+    def test_explicit_sublimit_caps_completion_and_reports_current_message_usage(self):
+        session = AgentSession(self.root)
+        with patch.dict('os.environ', {'AGENT_PLANNING_MAX_TOKENS': '2500'}):
+            recovery = PlanningRecovery(session, session.phase('planning', 'test', []), 3, True)
+            recovery.state['tokens'] = 1000
+            ceiling = recovery.before_call([], [], 128000)
+            self.assertEqual(ceiling, 2500 - 1000 - recovery.input_tokens)
+            recovery.state['tokens'] = 2200
+            with self.assertRaisesRegex(PlanningCheckpointReached, '本次对话.*已用 2,200.*上限 2,500'):
+                recovery.before_call([], [])
+
+    def test_real_usage_counts_instead_of_conservative_context_estimate(self):
+        session = AgentSession(self.root)
+        recovery = PlanningRecovery(session, session.phase('planning', 'test', []), 3, True)
+        recovery.before_call([{'role': 'user', 'content': '中' * 10000}], [])
+        recovery.record_response({'content': 'OK', '_response_meta': {
+            'prompt_tokens': 1000, 'completion_tokens': 10, 'total_tokens': 1010}})
+        self.assertEqual(recovery.state['tokens'], 1010)
+        # Older compatible gateways can omit total_tokens while returning
+        # actual prompt/completion counts, including a zero completion.
+        recovery.record_response({'content': '', '_response_meta': {'prompt_tokens': 500, 'completion_tokens': 0}})
+        self.assertEqual(recovery.state['tokens'], 1510)
+        restored = PlanningRecovery(session, recovery.phase, 3, True, initial_tokens=147545)
+        self.assertEqual(restored.state['tokens'], 147545)
+        self.assertEqual(restored.state['calls'], 2)
+
+    async def test_budget_preflight_uses_trimmed_input_window(self):
+        session = AgentSession(self.root)
+        phase = session.phase('planning', 'test', [])
+        messages = [{'role': 'user', 'content': '中' * 10000}]
+        seen = []
+        class Gateway:
+            async def chat(self, client, state, messages, tools, max_tokens):
+                seen.append((copy.deepcopy(messages), max_tokens))
+                return {'content': 'OK'}
+        with patch.dict('os.environ', {'AGENT_PLANNING_MAX_TOKENS': '2000'}), \
+                patch.object(session, 'phase_window', return_value=[{'role': 'user', 'content': 'trimmed'}]):
+            recovery = PlanningRecovery(session, phase, 3, True)
+            await phase_chat(session, Gateway(), None, AgentState.PLAN, messages, [],
+                             'planning', phase, 4096, before_call=recovery.before_call)
+        self.assertEqual(seen[0][0][0]['content'], 'trimmed')
+        self.assertEqual(seen[0][1], 2000 - recovery.input_tokens)
 
     def test_patch_draft_remains_retrievable_after_message_window_changes(self):
         session = AgentSession(self.root)

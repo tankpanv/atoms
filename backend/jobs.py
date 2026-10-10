@@ -372,7 +372,7 @@ async def process_project_queue(project_id: uuid.UUID):
                     on_step('state', AgentState.PLAN.value, '沿用原需求、架构与任务依赖，保留已完成进度')
                     plan = json.dumps(saved_plan, ensure_ascii=False)
                 else:
-                    plan = await await_or_stop(make_plan(project_id, effective_prompt, job["model"], media_context, on_step, history, expert_context, build_tier=build_tier, enabled_tools=job.get('enabled_tools', []), resume_planning=bool(planning_request) and not images and not documents and same_experts), should_stop)
+                    plan = await await_or_stop(make_plan(project_id, effective_prompt, job["model"], media_context, on_step, history, expert_context, build_tier=build_tier, enabled_tools=job.get('enabled_tools', []), resume_planning=bool(planning_request) and not images and not documents and same_experts, initial_tokens=tokens_used), should_stop)
                 if should_stop():
                     raise AgentStopped()
                 on_step("plan", "Mike 已将计划交给 Alex", plan)
