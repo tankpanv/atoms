@@ -27,11 +27,59 @@ def mark_unknown(request_id, error):
         conn.execute("UPDATE billing_requests SET status='unknown',error=%s,updated_at=NOW() WHERE id=%s AND status='reserved'", (str(error)[:1200], request_id))
 
 
+def record_attempt_failure(request_id, exc, seen_id, latest_usage):
+    # Each upstream generation retains its own usage and reservation, including
+    # interrupted streams. A later route must never overwrite this evidence.
+    not_sent = (isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
+                and seen_id is None and latest_usage is None)
+    terminal = not_sent or isinstance(exc, (ModelProviderError, httpx.HTTPStatusError))
+    retry_safe = not_sent or (isinstance(exc, ModelProviderError) and exc.retryable) or (
+        isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {429,500,502,503,504,524,529})
+    with connection() as conn:
+        conn.execute('UPDATE billing_requests SET attempt_finished=attempt_finished OR %s,retry_safe=%s,error=%s WHERE id=%s',
+                     (terminal,retry_safe,str(exc)[:1200],request_id))
+    if latest_usage and valid_usage(latest_usage):
+        with connection() as conn:
+            settle_request(conn, request_id, latest_usage)
+            conn.execute('UPDATE billing_requests SET error=%s WHERE id=%s', (str(exc)[:1200], request_id))
+    elif not_sent or (not seen_id and (isinstance(exc, ModelContextOverflow) or
+            (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500) or
+            (isinstance(exc, RuntimeError) and '请求失败 (4' in str(exc)))):
+        with connection() as conn:
+            reject_request(conn, request_id, str(exc))
+    else:
+        mark_unknown(request_id, exc)
+    return retry_safe
+
+
 async def execute_request(request_id, payload):
     gateway = ModelGateway(payload['model'])
-    seen_id = None
-    latest_usage = None
-    seen_model = None
+    current_request = request_id
+    started = False
+    error_recorded = False
+    retry_safe = False
+    children = []
+    seen_id = latest_usage = seen_model = None
+
+    async def begin_attempt(source, base_url):
+        nonlocal current_request, started, error_recorded, seen_id, latest_usage, seen_model
+        if started:
+            child = uuid.uuid4()
+            with connection() as conn:
+                root = conn.execute('SELECT * FROM billing_requests WHERE id=%s', (request_id,)).fetchone()
+                reserve_request(conn, child, root['project_id'], root['job_id'], root['model'],
+                                root['stage'], payload['max_tokens'], root['payload_hash'])
+                conn.execute('UPDATE billing_requests SET parent_request_id=%s WHERE id=%s', (request_id, child))
+                conn.execute('UPDATE billing_requests SET routed_request_id=%s WHERE id=%s', (child, request_id))
+            current_request = child
+            children.append(child)
+            active_requests[child] = asyncio.current_task()
+        started = True
+        error_recorded = False
+        seen_id = latest_usage = seen_model = None
+        with connection() as conn:
+            conn.execute('UPDATE billing_requests SET provider_source=%s,provider_base_url=%s WHERE id=%s',
+                         (source, base_url, current_request))
 
     def metadata(data):
         nonlocal seen_id, latest_usage, seen_model
@@ -39,56 +87,55 @@ async def execute_request(request_id, payload):
         usage = data.get('usage')
         if generation and generation != seen_id:
             with connection() as conn:
-                conn.execute('UPDATE billing_requests SET generation_id=%s,updated_at=NOW() WHERE id=%s', (generation, request_id))
+                conn.execute('UPDATE billing_requests SET generation_id=%s,updated_at=NOW() WHERE id=%s', (generation, current_request))
             seen_id = generation
         if usage:
             latest_usage = usage
             with connection() as conn:
-                conn.execute('UPDATE billing_requests SET usage=%s,updated_at=NOW() WHERE id=%s', (Jsonb(usage), request_id))
+                conn.execute('UPDATE billing_requests SET usage=%s,updated_at=NOW() WHERE id=%s', (Jsonb(usage), current_request))
         if data.get('model') and data['model'] != seen_model:
             with connection() as conn:
-                conn.execute('UPDATE billing_requests SET provider_model=%s WHERE id=%s', (data['model'], request_id))
+                conn.execute('UPDATE billing_requests SET provider_model=%s WHERE id=%s', (data['model'], current_request))
             seen_model = data['model']
+
+    async def attempt_error(exc):
+        nonlocal error_recorded, retry_safe
+        retry_safe = record_attempt_failure(current_request, exc, seen_id, latest_usage)
+        error_recorded = True
+
     gateway.on_metadata = metadata
+    gateway.on_attempt_start = begin_attempt
+    gateway.on_attempt_error = attempt_error
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=15)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=15)) as client, \
+                httpx.AsyncClient(timeout=httpx.Timeout(60, connect=5), trust_env=False) as direct_client:
+            gateway.dedicated_client = direct_client
             result = await gateway._stream(client, {**payload, 'stream': True, 'stream_options': {'include_usage': True}})
         with connection() as conn:
-            # Persist a complete response before accounting. Missing usage must
-            # not discard a valid answer or trigger another paid generation.
-            conn.execute('UPDATE billing_requests SET response=%s,attempt_finished=TRUE,updated_at=NOW() WHERE id=%s AND project_id IS NOT NULL', (Jsonb(result),request_id))
+            conn.execute('UPDATE billing_requests SET response=%s,attempt_finished=TRUE,updated_at=NOW() WHERE id=%s AND project_id IS NOT NULL', (Jsonb(result),current_request))
+            if current_request != request_id:
+                # Cache the final answer under the worker's original identity;
+                # its failed attempt keeps separate usage and settlement.
+                conn.execute('UPDATE billing_requests SET response=%s WHERE id=%s AND project_id IS NOT NULL', (Jsonb(result), request_id))
         usage = result.get('usage') or {}
         if valid_usage(usage):
             with connection() as conn:
-                settle_request(conn, request_id, usage, result)
+                settle_request(conn, current_request, usage, result)
         else:
-            mark_unknown(request_id, '模型响应已保存，用量等待真实对账')
+            mark_unknown(current_request, '模型响应已保存，用量等待真实对账')
         return result
     except Exception as exc:
-        # No HTTP request body has reached the provider on these failures.
-        # Read/write timeouts and truncated responses remain ambiguous: absence
-        # of a generation ID alone is NOT proof that inference never started.
-        not_sent = (isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
-                    and seen_id is None and latest_usage is None)
-        terminal = not_sent or isinstance(exc, ModelProviderError) or isinstance(exc, httpx.HTTPStatusError)
-        retry_safe = not_sent or (isinstance(exc, ModelProviderError) and exc.retryable) or (
-            isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {429,500,502,503,504,524,529})
-        with connection() as conn:
-            conn.execute('UPDATE billing_requests SET attempt_finished=attempt_finished OR %s,retry_safe=%s,error=%s WHERE id=%s', (terminal,retry_safe,str(exc)[:1200],request_id))
-        # Even a failed/truncated stream is charged when real usage was reported.
-        if latest_usage and valid_usage(latest_usage):
-            with connection() as conn:
-                settle_request(conn, request_id, latest_usage)
-                conn.execute('UPDATE billing_requests SET error=%s WHERE id=%s', (str(exc)[:1200], request_id))
-        elif not_sent or (not seen_id and (isinstance(exc, ModelContextOverflow) or (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500) or (isinstance(exc, RuntimeError) and '请求失败 (4' in str(exc)))):
-            with connection() as conn:
-                reject_request(conn, request_id, str(exc))
-        else:
-            mark_unknown(request_id, exc)
+        if isinstance(exc, HTTPException):
+            raise
+        if not error_recorded:
+            retry_safe = record_attempt_failure(current_request, exc, seen_id, latest_usage)
         if retry_safe:
             raise HTTPException(503, {'code':'MODEL_ATTEMPT_FAILED','retry_safe':True,
                 'message':'上游模型服务暂时失败，将保留上下文重试；本次用量独立对账'}) from exc
         raise HTTPException(502, f'模型调用失败：{str(exc)[:500]}') from exc
+    finally:
+        for child in children:
+            active_requests.pop(child, None)
 
 
 async def proxy_model(project_id, payload):
@@ -114,6 +161,13 @@ async def proxy_model(project_id, payload):
     if not created:
         if row['response']:
             return row['response']
+        if request_id in active_requests:
+            return await asyncio.shield(active_requests[request_id])
+        if row.get('routed_request_id'):
+            with connection() as conn:
+                row = conn.execute('SELECT * FROM billing_requests WHERE id=%s', (row['routed_request_id'],)).fetchone()
+            if row['response']:
+                return row['response']
         if row['retry_safe']:
             raise HTTPException(503, {'code':'MODEL_ATTEMPT_FAILED','retry_safe':True,
                 'message':'此前上游调用已明确失败，可以发起新的尝试'})
@@ -158,12 +212,12 @@ async def reconcile_once(request_ids=None):
         usage = row['usage']
         if row['generation_id'] and (not valid_usage(usage) or (not row['response'] and not row['attempt_finished'])):
             try:
-                base_url = os.getenv('AI_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
+                base_url = (row.get('provider_base_url') or os.getenv('AI_BASE_URL', 'https://openrouter.ai/api/v1')).rstrip('/')
                 # Only OpenRouter exposes this delayed usage endpoint. Other
                 # OpenAI-compatible sources may not implement it.
                 if base_url.endswith('/chat/completions'):
                     base_url = base_url[:-len('/chat/completions')]
-                if 'openrouter.ai' not in base_url:
+                if row.get('provider_source') == 'openai' or 'openrouter.ai' not in base_url:
                     continue
                 async with httpx.AsyncClient(timeout=15) as client:
                     response = await client.get(base_url + '/generation',

@@ -62,6 +62,10 @@ def init_billing_db(conn):
     conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS provider_model TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS attempt_finished BOOLEAN NOT NULL DEFAULT FALSE")
     conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS retry_safe BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS provider_source TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS provider_base_url TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS routed_request_id UUID")
+    conn.execute("ALTER TABLE billing_requests ADD COLUMN IF NOT EXISTS parent_request_id UUID")
     # Historical explicit SSE failures are terminal, unlike socket interruptions.
     conn.execute("""UPDATE billing_requests SET attempt_finished=TRUE,retry_safe=TRUE
         WHERE NOT attempt_finished AND error LIKE '模型流式返回错误：%%'
@@ -165,7 +169,9 @@ def settle_request(conn, request_id, usage, response=None):
     ledger(conn, row['user_id'], -charge, 'model_usage', f"{row['model']} · {row['stage']}", request_id=request_id,
            metadata={'model': row['model'], 'prompt_tokens': prompt, 'completion_tokens': completion, 'input_price': str(row['input_price']), 'output_price': str(row['output_price']), 'cost_usd': str(cost), 'credits_per_usd': str(row['credits_per_usd'])})
     return conn.execute("""UPDATE billing_requests SET status='settled',prompt_tokens=%s,completion_tokens=%s,cost_usd=%s,
-        charged_credits=%s,provider_cost_usd=%s,usage=%s,response=%s,updated_at=NOW() WHERE id=%s RETURNING *""",
+        charged_credits=%s,provider_cost_usd=%s,usage=%s,
+        response=CASE WHEN project_id IS NULL THEN NULL ELSE COALESCE(%s,response) END,
+        updated_at=NOW() WHERE id=%s RETURNING *""",
         (prompt, completion, cost, charge, usage.get('cost'), Jsonb(usage), Jsonb(response) if response and row['project_id'] is not None else None, request_id)).fetchone()
 
 

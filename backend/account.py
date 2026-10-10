@@ -214,7 +214,8 @@ def usage(user=Depends(current_user), offset: int = Query(0, ge=0)):
         ensure_profile(conn, user)
         requests = conn.execute("""SELECT b.id,b.project_id,p.title AS project_title,b.job_id,b.model,b.stage,b.status,
             b.prompt_tokens,b.completion_tokens,b.input_price,b.output_price,b.credits_per_usd,b.cost_usd,
-            b.charged_credits,b.provider_cost_usd,b.provider_model,b.reserved,b.generation_id,b.error,b.created_at,
+            b.charged_credits,b.provider_cost_usd,b.provider_model,b.provider_source,b.parent_request_id,
+            b.reserved,b.generation_id,b.error,b.created_at,
             COALESCE((b.usage->'prompt_tokens_details'->>'cached_tokens')::bigint,0) AS cached_tokens,
             COALESCE((b.usage->'prompt_tokens_details'->>'cache_write_tokens')::bigint,0) AS cache_write_tokens
             FROM billing_requests b LEFT JOIN projects p ON p.id=b.project_id WHERE b.user_id=%s

@@ -6,6 +6,8 @@ import difflib
 import copy
 import asyncio
 import json
+import hashlib
+import logging
 import os
 import re
 import time
@@ -17,6 +19,12 @@ from typing import Callable
 
 import httpx
 from billing_context import active_job
+
+logger = logging.getLogger(__name__)
+# Shared by gateways in the trusted service, scoped to credentials and model.
+# Workers never receive the dedicated upstream credentials.
+_openai_unavailable: dict[tuple[str, str, str], float] = {}
+OPENAI_RECOVERY_SECONDS = 300
 
 
 class AgentState(str, Enum):
@@ -134,6 +142,9 @@ class ModelGateway:
         self.on_usage = on_usage
         self.on_progress = on_progress
         self.on_metadata = None
+        self.on_attempt_start = None
+        self.on_attempt_error = None
+        self.dedicated_client = None
         self.session = None
         self.cache_scope = os.getenv('PROJECT_ID', '')
         # AI_BASE_URL is an OpenAI-compatible API root (for example
@@ -158,15 +169,82 @@ class ModelGateway:
         return model
 
     async def _stream(self, client: httpx.AsyncClient, payload: dict) -> dict:
+        if os.getenv('WORKER_TOKEN'):
+            return await self._stream_once(client, payload)
+        base_url = os.getenv('OPENAI_BASE_URL', '').strip().rstrip('/')
+        key = os.getenv('OPENAI_API_KEY', '').strip()
+        model = payload.get('model', '')
+        route_key = (base_url, hashlib.sha256(key.encode()).hexdigest(), model)
+        preferred = bool(base_url and key and model.startswith('openai/gpt'))
+
+        async def attempt(source, endpoint, credential, dedicated=False):
+            # Accounting hooks run outside the provider error handler: a failed
+            # reservation must never mark a healthy provider unavailable.
+            if self.on_attempt_start:
+                await self.on_attempt_start(source, endpoint)
+            try:
+                upstream_client = self.dedicated_client if dedicated and self.dedicated_client else client
+                result = await self._stream_once(upstream_client, payload, base_url=endpoint,
+                                                 key=credential, dedicated=dedicated)
+                result['_provider_source'] = source
+                return result
+            except Exception as exc:
+                if self.on_attempt_error:
+                    await self.on_attempt_error(exc)
+                raise
+
+        if preferred and time.monotonic() >= _openai_unavailable.get(route_key, 0):
+            for number in range(3):
+                try:
+                    result = await attempt('openai', base_url, key, dedicated=True)
+                    _openai_unavailable.pop(route_key, None)
+                    return result
+                except (RuntimeError, httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+                    # Context overflow needs context compaction, not another source.
+                    if isinstance(exc, ModelContextOverflow):
+                        raise
+                    logger.warning('Dedicated OpenAI model %s attempt %d/3 failed (%s)',
+                                   model, number + 1, type(exc).__name__)
+                    if self.on_progress:
+                        self.on_progress()
+                    if number < 2:
+                        await asyncio.sleep(2 ** number)
+            _openai_unavailable[route_key] = time.monotonic() + OPENAI_RECOVERY_SECONDS
+            logger.warning('Dedicated OpenAI model %s unavailable for %ds; using aggregate source',
+                           model, OPENAI_RECOVERY_SECONDS)
+        return await attempt('aggregate', self.base_url, self.key)
+
+    async def _stream_once(self, client: httpx.AsyncClient, payload: dict, *,
+                           base_url: str | None = None, key: str | None = None,
+                           dedicated: bool = False) -> dict:
+        base_url = self.base_url if base_url is None else base_url
+        key = self.key if key is None else key
+        payload = copy.deepcopy(payload)
+        if dedicated:
+            from agent_session import portable_messages
+            payload['model'] = payload['model'].split('/', 1)[1]
+            if 'max_tokens' in payload:
+                payload['max_completion_tokens'] = payload.pop('max_tokens')
+            reasoning = payload.pop('reasoning', None)
+            if isinstance(reasoning, dict) and reasoning.get('effort'):
+                payload['reasoning_effort'] = reasoning['effort']
+            # The aggregate QuickRouter path disables reasoning for tools.
+            # This GPT source accepts low/medium/high/xhigh/max, so translate
+            # the aggregate's none/minimal setting at this boundary only.
+            if payload.get('reasoning_effort') in {'none', 'minimal'}:
+                payload['reasoning_effort'] = 'low'
+            payload.pop('session_id', None)
+            payload['messages'] = portable_messages(payload['messages'])
+            payload.setdefault('stream_options', {'include_usage': True})
         # Keep the canonical ID through worker/billing; only direct upstream
         # requests use the provider's wire-format model name.
-        if not os.getenv('WORKER_TOKEN'):
+        if not dedicated and not os.getenv('WORKER_TOKEN'):
             payload = {**payload, "model": self.outbound_model(payload.get("model", ""))}
         # Apply provider compatibility at the final network boundary. Agent
         # calls pass through the billing proxy, so adapting only in chat() on
         # project workers is insufficient: the proxy's own ModelGateway sends
         # the actual provider request.
-        if (urlparse(self.base_url).hostname or '').lower() == 'api.quickrouter.ai':
+        if not dedicated and (urlparse(base_url).hostname or '').lower() == 'api.quickrouter.ai':
             payload = dict(payload)
             reasoning = payload.pop('reasoning', None)
             if payload.get('tools'):
@@ -180,16 +258,18 @@ class ModelGateway:
                     payload['reasoning_effort'] = effort
                 else:
                     payload.pop('reasoning_effort', None)
-        headers = {"Authorization": f"Bearer {self.key}", "HTTP-Referer": "http://localhost:5173",
+        headers = {"Authorization": f"Bearer {key}", "HTTP-Referer": "http://localhost:5173",
                    "X-OpenRouter-Title": "Atoms Coding Agent"}
-        url = self.base_url if self.base_url.endswith("/chat/completions") else f"{self.base_url}/chat/completions"
+        if dedicated:
+            headers = {'Authorization': f'Bearer {key}'}
+        url = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
         if os.getenv('WORKER_TOKEN'):
             if not active_job.get():
                 raise RuntimeError('模型调用缺少计费任务，拒绝绕过计费')
             url = f"http://agent-service:9001/projects/{os.environ['PROJECT_ID']}/model"
             headers = {'X-Worker-Token': os.environ['WORKER_TOKEN']}
             payload = {**payload, '_billing_job': active_job.get()}
-        if not os.getenv('WORKER_TOKEN') and 'openrouter.ai' in self.base_url:
+        if not dedicated and not os.getenv('WORKER_TOKEN') and 'openrouter.ai' in base_url:
             payload = {**payload, 'messages': [dict(m) for m in payload['messages']]}
             # Anthropic requires explicit breakpoints; other supported providers
             # use automatic prefix caching. Never cache generated responses locally.
@@ -218,6 +298,8 @@ class ModelGateway:
                     if context_overflow(str(data['error'])):
                         raise ModelContextOverflow(str(data['error']))
                     raise ModelProviderError(data['error'])
+                if not data.get('choices') or not isinstance(data['choices'][0].get('message'), dict):
+                    raise httpx.RemoteProtocolError('模型返回无效的 Chat Completions 响应')
                 return data
             content, reasoning, calls, usage, details = [], [], {}, {}, []
             details_seen = False

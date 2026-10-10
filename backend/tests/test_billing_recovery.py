@@ -12,7 +12,12 @@ from billing import reserve_request
 import test_billing as fixtures
 
 class BillingRecoveryTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self): fixtures.BillingTests.setUp(self)
+    def setUp(self):
+        fixtures.BillingTests.setUp(self)
+        env = patch.dict('os.environ', {'OPENAI_BASE_URL': '', 'OPENAI_API_KEY': '',
+                                      'AI_BASE_URL': 'https://openrouter.ai/api/v1'})
+        env.start()
+        self.addCleanup(env.stop)
     def tearDown(self): fixtures.BillingTests.tearDown(self)
     def payload(self, request):
         return {'_billing_request':str(request),'_billing_job':str(self.job),'_billing_stage':'IMPLEMENT',

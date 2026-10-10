@@ -21,7 +21,8 @@ def stream(*chunks):
 
 class StreamTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        endpoint = patch.dict('os.environ', {'AI_BASE_URL': 'https://openrouter.ai/api/v1'})
+        endpoint = patch.dict('os.environ', {'AI_BASE_URL': 'https://openrouter.ai/api/v1',
+                                            'OPENAI_BASE_URL': '', 'OPENAI_API_KEY': ''})
         endpoint.start()
         self.addCleanup(endpoint.stop)
 
